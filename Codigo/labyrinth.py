@@ -168,6 +168,9 @@ class Labyrinth():
 
         self.goToPoi()
 
+    def updateFromImage():
+        #WIP
+
 
 
 
