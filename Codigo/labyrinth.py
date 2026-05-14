@@ -1,11 +1,11 @@
 from collections import deque
 import numpy as np
+import cv2
 
 dirs = ['u', 'r', 'd', 'l']
 
 class Node():
     def __init__(self):
-
         #Basic
         self.u = self.d = self.l = self.r  = None
         self.tile = -1 # Shape of walls to show on map
@@ -20,7 +20,16 @@ class Node():
 
         #Auxiliar
         self.prev = None
-        self.x = self.y = -1
+        self.x = -1
+        self.y = -1
+
+    def connect(self, x, y):
+        self.x = x
+        self.y = y
+        self.explored = True
+
+    def setTile():
+        print("WIP")
             
 
 class POI():
@@ -149,14 +158,12 @@ class Labyrinth():
                     else:
                         ppcomands[-1][1] += 1
 
-            return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['b', 1], ['l', 3]]
+            return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]
 
         else:
             print(f"Camí de {self.currentNode} cap a {dest} no trobat.")
-            self.selectNextPOI()
-                    
+            self.selectNextPOI()        
             
-
     def selectNextPOI(self):
         if(self.poi.empty()):
             return None
@@ -169,7 +176,23 @@ class Labyrinth():
         self.goToPoi()
 
     def updateFromImage():
-        #WIP
+        cv2.imread("Test1.png")
+
+
+def start():
+    lab = Labyrinth()
+    lab.currentNode = Node()
+
+    lab.currentNode.connect(0, 0)
+    #SendSeq:
+        #ScanForward
+        #Turn
+        #ScanForward
+        #Turn
+        #ScanForward
+        #Turn
+        #ScanForward
+
 
 
 
