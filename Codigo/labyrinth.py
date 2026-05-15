@@ -176,7 +176,12 @@ class Labyrinth():
         self.goToPoi()
 
     def updateFromImage():
-        cv2.imread("Test1.png")
+        imgs=["Perspective", "Test1"]
+        input_path = f"imagenesCénitales/{imgs[1]}.png"
+        
+        cv2.imread(input_path)
+
+        
 
 
 def start():
