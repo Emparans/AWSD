@@ -1,8 +1,32 @@
 from collections import deque
 import numpy as np
 import cv2
+from pathlib import Path
 
 dirs = ['u', 'r', 'd', 'l']
+
+interpretationSpots = np.array([
+    #MIDDLE
+    [400, 2700],
+    [400, 2100],
+    [400, 1500],
+    [400,  900],
+    [400,  300],
+
+    #LEFT
+    [75, 2500],
+    [75, 1890],
+    [75, 1280],
+    [75,  670],
+    [75,   60],
+
+    #RIGHT
+    [725, 2500],
+    [725, 1890],
+    [725, 1280],
+    [725,  670],
+    [725,   60]
+], dtype=np.int32)
 
 class Node():
     def __init__(self):
@@ -28,7 +52,7 @@ class Node():
         self.y = y
         self.explored = True
 
-    def setTile():
+    def setTile(self):
         print("WIP")
             
 
@@ -40,7 +64,7 @@ class POI():
         self.time = 0
 
     def calculateHeuristic(self, currentNode):
-        dist = np.sqrt((self.tile.x - currentNode.x)**2 + (self.tile.y - currentNode)**2)
+        dist = np.sqrt((self.tile.x - currentNode.x)**2 + (self.tile.y - currentNode.y)**2)
         timeScaleFactor = np.sqrt(2) / 8
         self.h = np.max( dist - (timeScaleFactor * self.time), 0)
         self.time += 1
@@ -57,7 +81,7 @@ class Labyrinth():
         self.score = 0
 
         self.currentX = self.currentY = 0
-        self.currentDir = 0
+        self.currentDir = 'r'
         self.currentNode = None
         self.held = -1 # Id of the key the robot is carrying, -1 if none
 
@@ -81,14 +105,14 @@ class Labyrinth():
 
                 if ((n != None) and (n.explored == True) and (n.prev == None)):
                     n.prev = c
-                    if(n == dest):
+                    if(n == dest.tile):
                         found = True
                         break
                     else:
                         bfs.append(n)
                 
         if(found):
-            n = dest
+            n = dest.tile
             path = deque()
             while n != self.currentNode:
                 path.append(n)
@@ -153,7 +177,7 @@ class Labyrinth():
                     ppcomands.append([cmd, 1])
                     
                 elif cmd == 'f':
-                    if ppcomands.empty():
+                    if len(ppcomands) == 0:
                         ppcomands.append(['f', 1])
                     else:
                         ppcomands[-1][1] += 1
@@ -161,42 +185,63 @@ class Labyrinth():
             return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]
 
         else:
-            print(f"Camí de {self.currentNode} cap a {dest} no trobat.")
+            print(f"Camí de {self.currentNode} cap a {dest.tile} no trobat.")
             self.selectNextPOI()        
             
     def selectNextPOI(self):
-        if(self.poi.empty()):
+        if(len(self.poi) == 0):
             return None
         
         for p in self.poi:
-            p.calculateHeuristic()
+            p.calculateHeuristic(self.currentNode)
             
-        self.poi.sort(key=lambda x: x.count, reverse=True)
+        self.poi.sort(key=lambda x: x.h, reverse=True)
 
         self.goToPoi()
 
-    def updateFromImage():
+    def updateFromImage(self):
         imgs=["Perspective", "Test1"]
-        input_path = f"imagenesCénitales/{imgs[1]}.png"
+        imgName = imgs[1]
+        input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.png"
         
-        cv2.imread(input_path)
+        img = cv2.imread(input_path)
+        if img is None:
+            print(f"No se pudo cargar la imagen en {input_path}")
+            exit()
+
+        # VIEW & SAVE DOTTED IMAGE
+        # for i, pt in enumerate(interpretationSpots):
+        #     cv2.circle(
+        #         img,
+        #         tuple(pt.astype(int)),
+        #         7,
+        #         (0, 0, 255),
+        #         -1
+        #     )
+
+        # output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
+        # cv2.imwrite(output_path, img)
+        # cv2.imshow("homo", img)
+        
+        # cv2.waitKey(0)
 
         
 
 
-def start():
-    lab = Labyrinth()
-    lab.currentNode = Node()
+lab = Labyrinth(3)
+lab.currentNode = Node()
 
-    lab.currentNode.connect(0, 0)
-    #SendSeq:
-        #ScanForward
-        #Turn
-        #ScanForward
-        #Turn
-        #ScanForward
-        #Turn
-        #ScanForward
+lab.currentNode.connect(0, 0)
+#SendSeq:
+#ScanForward
+#Turn
+#ScanForward
+#Turn
+#ScanForward
+#Turn
+#ScanForward
+
+lab.updateFromImage()
 
 
 
