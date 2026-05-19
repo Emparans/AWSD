@@ -72,7 +72,7 @@ class POI():
 
 class Labyrinth():
     def __init__(self, nOfQuests):
-        self.map = []
+        self.map = {}
         self.poi = []
         
         self.remainingQuests = nOfQuests
@@ -80,7 +80,7 @@ class Labyrinth():
 
         self.score = 0
 
-        self.currentX = self.currentY = 0
+        self.currentPos = (0, 0)
         self.currentDir = 'r'
         self.currentNode = None
         self.held = -1 # Id of the key the robot is carrying, -1 if none
@@ -204,7 +204,7 @@ class Labyrinth():
         imgName = imgs[1]
         input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.png"
         
-        img = cv2.imread(input_path)
+        img = cv2.imread(input_path, 0)
         if img is None:
             print(f"No se pudo cargar la imagen en {input_path}")
             exit()
@@ -225,13 +225,39 @@ class Labyrinth():
         
         # cv2.waitKey(0)
 
-        
+        t = 0
+        for pt in interpretationSpots[0:5]:
+            px, py = pt
+            coords = self.currentPos
+            dir = self.currentDir
 
+            if(dir == 'u'):
+                coords[1] += 1
+            elif (dir == 'd'):
+                coords[1] -= 1
+            elif(dir == 'l'):
+                coords[0] -= 1
+            elif (dir == 'r'):
+                coords[1] += 1
 
+            tile = img[py, px] == 255
+
+            if(tile):
+                if(not self.map[coords]):
+                    n = Node()
+                    self.map[coords] = n
+                    n.connect(coords[0], coords[1])
+                
+            else:
+                break
+            
+            
 lab = Labyrinth(3)
-lab.currentNode = Node()
+iN = Node()
+lab.currentNode = iN
+lab.map[(0, 0)] = iN
+iN.connect(0, 0)
 
-lab.currentNode.connect(0, 0)
 #SendSeq:
 #ScanForward
 #Turn
