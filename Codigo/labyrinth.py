@@ -1,6 +1,7 @@
 from collections import deque
 import numpy as np
 import cv2
+import json
 from pathlib import Path
 
 dirs = ['u', 'r', 'd', 'l']
@@ -103,6 +104,12 @@ class Node():
                 neighbor.l = self
             else:
                 lab.addPOI(self, 'r')
+
+        self.tile = 0
+        if self.u == 'Wall': self.tile += 1
+        if self.r == 'Wall': self.tile += 2
+        if self.d == 'Wall': self.tile += 4
+        if self.l == 'Wall': self.tile += 8
             
 
 class POI():
@@ -326,6 +333,7 @@ class Labyrinth():
                     n = Node()
                     self.map[current_coords] = n
                     n.connect(current_coords[0], current_coords[1])
+                    self.mapRemain -= 1
                 else:
                     n = self.map[current_coords]
                 
@@ -427,6 +435,7 @@ class Labyrinth():
                 n = Node()
                 self.map[current_coords] = n
                 n.connect(current_coords[0], current_coords[1])
+                self.mapRemain -= 1
             else:
                 n = self.map[current_coords]
 
@@ -525,7 +534,55 @@ class Labyrinth():
             r_char = '|' if node.r == 'Wall' else '?' if node.r is None else ' '
             grid[cy][cx+2] = r_char
 
-        return("\n".join("".join(row) for row in grid))            
+        return("\n".join("".join(row) for row in grid))
+
+    def toJSON(self):
+        #FUNCIÓN GENERADA CON IA
+        nodes_list = []
+        for coords, node in self.map.items():
+            def parse_boundary(b):
+                if b == 'Wall': return 'Wall'
+                if b is None: return None
+                return 'Node'
+
+            nodes_list.append({
+                "coords": list(coords),
+                "explored": node.explored,
+                "mapped": node.mapped,
+                "typeTile": node.typeTile,
+                "id": node.id,
+                "locked": node.locked,
+                "boundaries": {
+                    "u": parse_boundary(node.u),
+                    "d": parse_boundary(node.d),
+                    "l": parse_boundary(node.l),
+                    "r": parse_boundary(node.r)
+                }
+            })
+
+        pois_list = []
+        for p in self.poi:
+            pois_list.append({
+                "targetCoords": list(p.tile.coords),
+                "dirToLook": p.dirToLook
+            })
+
+        payload = {
+            "state": {
+                "remainingQuests": self.remainingQuests,
+                "mapRemain": self.mapRemain,
+                "score": self.score
+            },
+            "robot": {
+                "currentPos": list(self.currentPos),
+                "currentDir": self.currentDir,
+                "held": self.held
+            },
+            "nodes": nodes_list,
+            "pois": pois_list
+        }
+
+        return json.dumps(payload, indent=2)            
 
 def start():      
     lab = Labyrinth(3)
@@ -533,6 +590,7 @@ def start():
     lab.currentNode = iN
     lab.map[(0, 0)] = iN
     iN.connect(0, 0)
+    lab.mapRemain -= 1
 
     iN.setTile(lab)
     return lab
