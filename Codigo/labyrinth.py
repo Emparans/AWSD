@@ -44,29 +44,57 @@ class Node():
 
         #Auxiliar
         self.prev = None
-        self.x = -1
-        self.y = -1
+        self.coords = (-100, -100)
 
     def connect(self, x, y):
-        self.x = x
-        self.y = y
+        self.coords = (x, y)
         self.explored = True
 
-    def setTile(self):
-        print("WIP")
+    def setTile(self, lab):
+        x, y = self.coords
+        if(self.u == None):
+            if((x, y + 1) in lab.map):
+                neighbor = lab.map[(x, y + 1)]
+                self.u = neighbor
+                neighbor.d = self
+            else:
+                lab.addPOI(self, 'u')
+        if(self.d == None):
+            if((x, y - 1) in lab.map):
+                neighbor = lab.map[(x, y - 1)]
+                self.d = neighbor
+                neighbor.u = self
+            else:
+                lab.addPOI(self, 'd')
+        if(self.l == None):
+            if((x - 1, y) in lab.map):
+                neighbor = lab.map[(x - 1, y)]
+                self.l = neighbor
+                neighbor.r = self
+            else:
+                lab.addPOI(self, 'l')
+        if(self.r == None):
+            if((x + 1, y) in lab.map):
+                neighbor = lab.map[(x + 1, y)]
+                self.r = neighbor
+                neighbor.l = self
+            else:
+                lab.addPOI(self, 'r')
             
 
 class POI():
-    def __init__(self):
-        self.tile = None
-        self.dirToLook = -1 # U = 0, R = 1, D = 2, L = 3
+    def __init__(self, tile, dirToLook):
+        self.tile = tile
+        self.dirToLook = dirToLook #U, D, L, R
         self.h = -1
         self.time = 0
 
     def calculateHeuristic(self, currentNode):
-        dist = np.sqrt((self.tile.x - currentNode.x)**2 + (self.tile.y - currentNode.y)**2)
+        tx, ty = self.tile.coords
+        cx, cy = currentNode.coords
+        dist = abs(tx - cx) + abs(ty - cy)
         timeScaleFactor = np.sqrt(2) / 8
-        self.h = np.max( dist - (timeScaleFactor * self.time), 0)
+        self.h = max( dist - (timeScaleFactor * self.time), 0)
         self.time += 1
 
 
@@ -85,10 +113,20 @@ class Labyrinth():
         self.currentNode = None
         self.held = -1 # Id of the key the robot is carrying, -1 if none
 
+    def addPOI(self, tile, dirToLook):
+        if not any(p.tile == tile and p.dirToLook == dirToLook for p in self.poi):
+            self.poi.append(POI(tile, dirToLook))
+
     def goToPoi(self):
+        if not self.poi:
+            return []
+
         dest = self.poi.pop(0)
 
-        for m in self.map:
+        if getattr(dest.tile, dest.dirToLook) is not None:
+            return self.goToPoi()
+
+        for m in self.map.values():
             m.prev = None
         
         self.currentNode.prev = self.currentNode
@@ -97,13 +135,16 @@ class Labyrinth():
         bfs.append(self.currentNode)
 
         found = False
+        if self.currentNode == dest.tile:
+            found = True
+
         while bfs and not found:
             c = bfs.popleft()
 
             for dir in dirs:
                 n = getattr(c, dir)
 
-                if ((n != None) and (n.explored == True) and (n.prev == None)):
+                if (isinstance(n, Node) and (n.explored == True) and (n.prev == None)):
                     n.prev = c
                     if(n == dest.tile):
                         found = True
@@ -120,7 +161,7 @@ class Labyrinth():
             
             #n = currentnode here
 
-            commands = [] # f- forward, l- turn left + forward, r- turn right + forward, b- double turn right + forward
+            commands = [] # f- n forwards, l- turn left + n forwards, r- turn right + n forwards, b- double turn right + n forwards
             lastcommand = self.currentDir
 
             while path:
@@ -168,8 +209,7 @@ class Labyrinth():
                         commands.append("f")
                     lastcommand = 'l'
                 
-                n = path[-1]
-                path.pop()
+                n = path.pop()                
 
             ppcomands = []
             for cmd in commands:
@@ -182,11 +222,27 @@ class Labyrinth():
                     else:
                         ppcomands[-1][1] += 1
 
+            if lastcommand != dest.dirToLook:
+                turn_map = {
+                    ('u', 'l'): 'l', ('u', 'r'): 'r', ('u', 'd'): 'b',
+                    ('d', 'r'): 'l', ('d', 'l'): 'r', ('d', 'u'): 'b',
+                    ('l', 'd'): 'l', ('l', 'u'): 'r', ('l', 'r'): 'b',
+                    ('r', 'u'): 'l', ('r', 'd'): 'r', ('r', 'l'): 'b'
+                }
+                needed_turn = turn_map.get((lastcommand, dest.dirToLook))
+                if needed_turn:
+                    ppcomands.append([needed_turn, 0])
+
+            #Will be updated elsewhere, in real time as the robot moves forward. This is only for debug purposes
+            self.currentNode = dest.tile
+            self.currentPos = dest.tile.coords
+            self.currentDir = dest.dirToLook
+
             return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]
 
         else:
             print(f"Camí de {self.currentNode} cap a {dest.tile} no trobat.")
-            self.selectNextPOI()        
+            return self.selectNextPOI()        
             
     def selectNextPOI(self):
         if(len(self.poi) == 0):
@@ -195,13 +251,10 @@ class Labyrinth():
         for p in self.poi:
             p.calculateHeuristic(self.currentNode)
             
-        self.poi.sort(key=lambda x: x.h, reverse=True)
+        self.poi.sort(key=lambda x: x.h, reverse=False)
+        return self.goToPoi()
 
-        self.goToPoi()
-
-    def updateFromImage(self):
-        imgs=["Perspective", "Test1"]
-        imgName = imgs[1]
+    def updateFromImage(self, imgName):
         input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.png"
         
         img = cv2.imread(input_path, 0)
@@ -225,12 +278,12 @@ class Labyrinth():
         
         # cv2.waitKey(0)
 
-        t = 0
+        #Process path
+        prev = self.currentNode
+        coords = list(self.currentPos)
+        dir = self.currentDir
+        tilesToUpdate = deque()
         for pt in interpretationSpots[0:5]:
-            px, py = pt
-            coords = self.currentPos
-            dir = self.currentDir
-
             if(dir == 'u'):
                 coords[1] += 1
             elif (dir == 'd'):
@@ -238,18 +291,127 @@ class Labyrinth():
             elif(dir == 'l'):
                 coords[0] -= 1
             elif (dir == 'r'):
-                coords[1] += 1
+                coords[0] += 1
 
-            tile = img[py, px] == 255
+            current_coords = tuple(coords)
+
+            px, py = pt
+            tile = img[py, px] == 0
 
             if(tile):
-                if(not self.map[coords]):
+                if(current_coords not in self.map):
                     n = Node()
-                    self.map[coords] = n
-                    n.connect(coords[0], coords[1])
+                    self.map[current_coords] = n
+                    n.connect(current_coords[0], current_coords[1])
+                else:
+                    n = self.map[current_coords]
                 
+                setattr(prev, dir, n)
+                if(dir == 'u'):
+                    setattr(n, 'd', prev)
+                elif (dir == 'd'):
+                    setattr(n, 'u', prev)
+                elif(dir == 'l'):
+                    setattr(n, 'r', prev)
+                elif (dir == 'r'):
+                    setattr(n, 'l', prev)
+                
+                prev = n
+                tilesToUpdate.append(n)
             else:
                 break
+
+        if dir == 'u' and prev.u is None: prev.u = 'Wall'
+        elif dir == 'd' and prev.d is None: prev.d = 'Wall'
+        elif dir == 'l' and prev.l is None: prev.l = 'Wall'
+        elif dir == 'r' and prev.r is None: prev.r = 'Wall'
+
+        #Add Walls
+        for i, t in enumerate(tilesToUpdate):
+            #Left
+            px, py = interpretationSpots[i + 5]
+            if(img[py, px] == 255):
+                if(dir == 'u' and t.l is None):
+                    t.l = 'Wall'
+                elif (dir == 'd' and t.r is None):
+                    t.r = 'Wall'
+                elif(dir == 'l' and t.d is None):
+                    t.d = 'Wall'
+                elif (dir == 'r' and t.u is None):
+                    t.u = 'Wall'
+
+            #Right
+            px, py = interpretationSpots[i + 10]
+            if(img[py, px] == 255):
+                if(dir == 'u' and t.r is None):
+                    t.r = 'Wall'
+                elif (dir == 'd' and t.l is None):
+                    t.l = 'Wall'
+                elif(dir == 'l' and t.u is None):
+                    t.u = 'Wall'
+                elif (dir == 'r' and t.d is None):
+                    t.d = 'Wall'
+
+        #Process inverse path to set tiles
+        while len(tilesToUpdate) > 0:
+            t = tilesToUpdate.pop()
+            t.setTile(self)
+
+        return self.selectNextPOI()
+            
+    def printLab(self):
+        #FUNCIÓN GENERADA CON IA
+        if not self.map:
+            return "Empty Map"
+
+        min_x = min(x for x, y in self.map.keys())
+        max_x = max(x for x, y in self.map.keys())
+        min_y = min(y for x, y in self.map.keys())
+        max_y = max(y for x, y in self.map.keys())
+
+
+        cols = (max_x - min_x + 1) * 4 + 1
+        rows = (max_y - min_y + 1) * 2 + 1
+        
+        grid = [[' ' for _ in range(cols)] for _ in range(rows)]
+
+        poi_coords = {p.tile.coords for p in self.poi if hasattr(p.tile, 'coords')}
+        
+        dir_chars = {'u': '^', 'd': 'v', 'l': '<', 'r': '>'}
+
+        for (x, y), node in self.map.items():
+            cx = (x - min_x) * 4 + 2
+            cy = (max_y - y) * 2 + 1
+
+            grid[cy-1][cx-2] = '+'
+            grid[cy-1][cx+2] = '+'
+            grid[cy+1][cx-2] = '+'
+            grid[cy+1][cx+2] = '+'
+
+            if (x, y) == self.currentPos:
+                grid[cy][cx] = dir_chars.get(self.currentDir, 'R')
+            elif (x, y) in poi_coords:
+                grid[cy][cx] = '*'
+            else:
+                grid[cy][cx] = '.'
+
+            u_char = '-' if node.u == 'Wall' else '?' if node.u is None else ' '
+            grid[cy-1][cx-1] = u_char
+            grid[cy-1][cx]   = u_char
+            grid[cy-1][cx+1] = u_char
+
+            d_char = '-' if node.d == 'Wall' else '?' if node.d is None else ' '
+            grid[cy+1][cx-1] = d_char
+            grid[cy+1][cx]   = d_char
+            grid[cy+1][cx+1] = d_char
+
+            l_char = '|' if node.l == 'Wall' else '?' if node.l is None else ' '
+            grid[cy][cx-2] = l_char
+
+            r_char = '|' if node.r == 'Wall' else '?' if node.r is None else ' '
+            grid[cy][cx+2] = r_char
+
+        print("\n".join("".join(row) for row in grid))
             
             
 lab = Labyrinth(3)
@@ -258,19 +420,9 @@ lab.currentNode = iN
 lab.map[(0, 0)] = iN
 iN.connect(0, 0)
 
-#SendSeq:
-#ScanForward
-#Turn
-#ScanForward
-#Turn
-#ScanForward
-#Turn
-#ScanForward
+iN.setTile(lab)
 
-lab.updateFromImage()
-
-
-
-
-
-    
+imgs=["Perspective", "Test1"]
+lab.updateFromImage(imgs[0])
+lab.updateFromImage(imgs[1])
+lab.printLab()
