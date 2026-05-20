@@ -28,6 +28,29 @@ interpretationSpots = np.array([
     [725,   60]
 ], dtype=np.int32)
 
+interpretationSpotsGT = np.array([
+    #MIDDLE
+    [118, 177],
+    [238, 177],
+    [358, 177],
+    [478, 177],
+    [598, 177],
+
+    #LEFT
+    [ 59, 123],
+    [177, 123],
+    [295, 123],
+    [413, 123],
+    [531, 123],
+
+    #RIGHT
+    [ 59, 243],
+    [177, 243],
+    [295, 243],
+    [413, 243],
+    [531, 243],
+], dtype=np.int32)
+
 class Node():
     def __init__(self):
         #Basic
@@ -296,7 +319,7 @@ class Labyrinth():
             current_coords = tuple(coords)
 
             px, py = pt
-            tile = img[py, px] == 0
+            tile = img[py, px] < 128
 
             if(tile):
                 if(current_coords not in self.map):
@@ -330,7 +353,7 @@ class Labyrinth():
         for i, t in enumerate(tilesToUpdate):
             #Left
             px, py = interpretationSpots[i + 5]
-            if(img[py, px] == 255):
+            if(img[py, px] > 128):
                 if(dir == 'u' and t.l is None):
                     t.l = 'Wall'
                 elif (dir == 'd' and t.r is None):
@@ -342,7 +365,7 @@ class Labyrinth():
 
             #Right
             px, py = interpretationSpots[i + 10]
-            if(img[py, px] == 255):
+            if(img[py, px] > 128):
                 if(dir == 'u' and t.r is None):
                     t.r = 'Wall'
                 elif (dir == 'd' and t.l is None):
@@ -358,6 +381,97 @@ class Labyrinth():
             t.setTile(self)
 
         return self.selectNextPOI()
+
+    def generateGT(self, imgName):
+        input_path = f"{Path(__file__).parent}/gt/{imgName}.png"
+        
+        img = cv2.imread(input_path, 0)
+        if img is None:
+            print(f"No se pudo cargar la imagen en {input_path}")
+            exit()
+
+        kernel = np.ones((7,7), np.uint8)
+        img = cv2.morphologyEx(img, cv2.MORPH_DILATE, kernel)
+
+        # VIEW & SAVE DOTTED IMAGE
+        # for i, pt in enumerate(interpretationSpotsGT):
+        #     cv2.circle(
+        #         img,
+        #         tuple(pt.astype(int)),
+        #         7,
+        #         (0, 0, 255),
+        #         -1
+        #     )
+
+        # output_path = f"{Path(__file__).parent}/gt/{imgName}_Dotted.png"
+        # cv2.imwrite(output_path, img)
+        # cv2.imshow("gt", img)
+        
+        # cv2.waitKey(0)
+
+        dir = self.currentDir 
+        coords = list(self.currentPos)
+        prev = self.currentNode
+        
+        tilesToUpdate = deque()
+
+        for i in range(5):
+            if dir == 'r': coords[0] += 1
+            elif dir == 'l': coords[0] -= 1
+            elif dir == 'u': coords[1] += 1
+            elif dir == 'd': coords[1] -= 1
+            
+            current_coords = tuple(coords)
+            
+            if current_coords not in self.map:
+                n = Node()
+                self.map[current_coords] = n
+                n.connect(current_coords[0], current_coords[1])
+            else:
+                n = self.map[current_coords]
+
+            setattr(prev, dir, n)
+            if dir == 'r': n.l = prev
+            elif dir == 'l': n.r = prev
+            elif dir == 'u': n.d = prev
+            elif dir == 'd': n.u = prev
+            
+            px_l, py_l = interpretationSpotsGT[i + 5]
+            px_r, py_r = interpretationSpotsGT[i + 10]
+            
+            if img[py_l, px_l] > 128:
+                if dir == 'r': n.u = 'Wall'
+                elif dir == 'l': n.d = 'Wall'
+                elif dir == 'u': n.l = 'Wall'
+                elif dir == 'd': n.r = 'Wall'
+
+            if img[py_r, px_r] > 128:
+                if dir == 'r': n.d = 'Wall'
+                elif dir == 'l': n.u = 'Wall'
+                elif dir == 'u': n.r = 'Wall'
+                elif dir == 'd': n.l = 'Wall'
+
+            tilesToUpdate.append(n)
+
+            px_m, py_m = interpretationSpotsGT[i]
+            
+            if img[py_m, px_m] > 128:
+                if dir == 'r': n.r = 'Wall'
+                elif dir == 'l': n.l = 'Wall'
+                elif dir == 'u': n.u = 'Wall'
+                elif dir == 'd': n.d = 'Wall'
+                break
+                
+            prev = n
+
+        if dir == 'u' and prev.u is None: prev.u = 'Wall'
+        elif dir == 'd' and prev.d is None: prev.d = 'Wall'
+        elif dir == 'l' and prev.l is None: prev.l = 'Wall'
+        elif dir == 'r' and prev.r is None: prev.r = 'Wall'
+
+        while len(tilesToUpdate) > 0:
+            t = tilesToUpdate.pop()
+            t.setTile(self)
             
     def printLab(self):
         #FUNCIÓN GENERADA CON IA
@@ -411,18 +525,28 @@ class Labyrinth():
             r_char = '|' if node.r == 'Wall' else '?' if node.r is None else ' '
             grid[cy][cx+2] = r_char
 
-        print("\n".join("".join(row) for row in grid))
-            
-            
-lab = Labyrinth(3)
-iN = Node()
-lab.currentNode = iN
-lab.map[(0, 0)] = iN
-iN.connect(0, 0)
+        return("\n".join("".join(row) for row in grid))            
 
-iN.setTile(lab)
+def start():      
+    lab = Labyrinth(3)
+    iN = Node()
+    lab.currentNode = iN
+    lab.map[(0, 0)] = iN
+    iN.connect(0, 0)
+
+    iN.setTile(lab)
+    return lab
 
 imgs=["Perspective", "Test1"]
-lab.updateFromImage(imgs[0])
-lab.updateFromImage(imgs[1])
-lab.printLab()
+labHomo = start()
+labGT = start()
+
+labGT.generateGT(imgs[0])
+gt = labGT.printLab()
+
+labHomo.updateFromImage(imgs[0])
+homo = labHomo.printLab()
+
+print(gt)
+print()
+print(homo)
