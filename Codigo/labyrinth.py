@@ -8,25 +8,25 @@ dirs = ['u', 'r', 'd', 'l']
 
 interpretationSpots = np.array([
     #MIDDLE
-    [400, 2700],
+    [400, 2699],
     [400, 2100],
     [400, 1500],
     [400,  900],
     [400,  300],
 
     #LEFT
-    [75, 2500],
-    [75, 1890],
-    [75, 1280],
-    [75,  670],
-    [75,   60],
+    [70, 2630],
+    [70, 2065],
+    [70, 1450],
+    [70,  815],
+    [70,  180],
 
     #RIGHT
-    [725, 2500],
-    [725, 1890],
-    [725, 1280],
-    [725,  670],
-    [725,   60]
+    [760, 2630],
+    [760, 2065],
+    [760, 1450],
+    [760,  815],
+    [760,  180]
 ], dtype=np.int32)
 
 interpretationSpotsGT = np.array([
@@ -285,8 +285,8 @@ class Labyrinth():
         return self.goToPoi()
 
     def updateFromImage(self, imgName):
-        input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.png"
-        
+        input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.jpg"
+
         img = cv2.imread(input_path, 0)
         if img is None:
             print(f"No se pudo cargar la imagen en {input_path}")
@@ -297,7 +297,7 @@ class Labyrinth():
         #     cv2.circle(
         #         img,
         #         tuple(pt.astype(int)),
-        #         7,
+        #         k,
         #         (0, 0, 255),
         #         -1
         #     )
@@ -309,6 +309,10 @@ class Labyrinth():
         # cv2.waitKey(0)
 
         #Process path
+        k = 3 #Pixels to check around the interpretationSpots (2 = 5x5 area, 3 = 7x7 area...)
+        th = 0.3
+        tileKMultiplier = 5
+
         prev = self.currentNode
         coords = list(self.currentPos)
         dir = self.currentDir
@@ -326,7 +330,14 @@ class Labyrinth():
             current_coords = tuple(coords)
 
             px, py = pt
-            tile = img[py, px] < 128
+            y1 = max(0, py - (k * tileKMultiplier))
+            y2 = min(img.shape[0], py + (k * tileKMultiplier) + 1)
+            x1 = max(0, px - (k * tileKMultiplier))
+            x2 = min(img.shape[1], px + (k * tileKMultiplier) + 1)
+
+            roi = img[y1:y2, x1:x2]
+
+            tile = np.mean(roi < 128) > 0.7
 
             if(tile):
                 if(current_coords not in self.map):
@@ -361,7 +372,17 @@ class Labyrinth():
         for i, t in enumerate(tilesToUpdate):
             #Left
             px, py = interpretationSpots[i + 5]
-            if(img[py, px] > 128):
+
+            y1 = max(0, py - k)
+            y2 = min(img.shape[0], py + k + 1)
+            x1 = max(0, px - k)
+            x2 = min(img.shape[1], px + k + 1)
+
+            roi = img[y1:y2, x1:x2]
+
+            is_wall = np.mean(roi > 128) > th
+
+            if(is_wall):
                 if(dir == 'u' and t.l is None):
                     t.l = 'Wall'
                 elif (dir == 'd' and t.r is None):
@@ -373,7 +394,16 @@ class Labyrinth():
 
             #Right
             px, py = interpretationSpots[i + 10]
-            if(img[py, px] > 128):
+            y1 = max(0, py - k)
+            y2 = min(img.shape[0], py + k + 1)
+            x1 = max(0, px - k)
+            x2 = min(img.shape[1], px + k + 1)
+
+            roi = img[y1:y2, x1:x2]
+
+            is_wall = np.mean(roi > 128) > th
+
+            if(is_wall):
                 if(dir == 'u' and t.r is None):
                     t.r = 'Wall'
                 elif (dir == 'd' and t.l is None):
@@ -391,7 +421,7 @@ class Labyrinth():
         return self.selectNextPOI()
 
     def generateGT(self, imgName):
-        input_path = f"{Path(__file__).parent}/gt/{imgName}.png"
+        input_path = f"{Path(__file__).parent}/gt/{imgName}.jpg"
         
         img = cv2.imread(input_path, 0)
         if img is None:
@@ -584,6 +614,25 @@ class Labyrinth():
 
         return json.dumps(payload, indent=2)            
 
+def find_wall_errors(labGT, labHomo):
+    errors = []
+    
+    for coords, gt_node in labGT.map.items():
+        if coords not in labHomo.map:
+            errors.append(f"  [!] Missing Tile: GT found a tile at {coords}, but Homo missed it.")
+            continue
+
+        homo_node = labHomo.map[coords]
+
+        for d in ['u', 'd', 'l', 'r']:
+            gt_is_wall = (getattr(gt_node, d) == 'Wall')
+            homo_is_wall = (getattr(homo_node, d) == 'Wall')
+
+            if gt_is_wall != homo_is_wall:
+                errors.append(f"  [-] Mismatch at Tile {coords} | Dir '{d}': GT says Wall={gt_is_wall}, Homo says Wall={homo_is_wall}")
+                
+    return errors
+
 def start():      
     lab = Labyrinth(3)
     iN = Node()
@@ -595,16 +644,24 @@ def start():
     iN.setTile(lab)
     return lab
 
-imgs=["Perspective", "Test1"]
-labHomo = start()
-labGT = start()
+correct = 0
 
-labGT.generateGT(imgs[0])
-gt = labGT.printLab()
+for i in range(60):
+    imgs = f"img_{i}"
+    labHomo = start()
+    labGT = start()
 
-labHomo.updateFromImage(imgs[0])
-homo = labHomo.printLab()
+    labGT.generateGT(imgs)
+    gt = labGT.printLab()
 
-print(gt)
-print()
-print(homo)
+    labHomo.updateFromImage(imgs)
+    labHomo.currentDir = 'r'
+    homo = labHomo.printLab()
+
+    if(gt == homo):
+        correct += 1
+    else:
+        print(find_wall_errors(labGT, labHomo))
+     
+
+print(correct)
