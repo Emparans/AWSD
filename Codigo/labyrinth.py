@@ -8,18 +8,23 @@ dirs = ['u', 'r', 'd', 'l']
 
 interpretationSpots = np.array([
     #MIDDLE
-    [400, 2699],
+    [400, 2660],
+    [400, 2640],
+    [400, 2300],
     [400, 2100],
+    [400, 1700],
     [400, 1500],
+    [400, 1100],
     [400,  900],
+    [400,  500],
     [400,  300],
 
     #LEFT
-    [70, 2630],
-    [70, 2065],
-    [70, 1450],
-    [70,  815],
-    [70,  180],
+    [50, 2630],
+    [50, 2065],
+    [50, 1450],
+    [50,  815],
+    [50,  180],
 
     #RIGHT
     [760, 2630],
@@ -287,37 +292,23 @@ class Labyrinth():
     def updateFromImage(self, imgName):
         input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.jpg"
 
-        img = cv2.imread(input_path, 0)
+        img = cv2.imread(input_path)
         if img is None:
             print(f"No se pudo cargar la imagen en {input_path}")
             exit()
 
-        # VIEW & SAVE DOTTED IMAGE
-        # for i, pt in enumerate(interpretationSpots):
-        #     cv2.circle(
-        #         img,
-        #         tuple(pt.astype(int)),
-        #         k,
-        #         (0, 0, 255),
-        #         -1
-        #     )
-
-        # output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
-        # cv2.imwrite(output_path, img)
-        # cv2.imshow("homo", img)
-        
-        # cv2.waitKey(0)
-
         #Process path
-        k = 3 #Pixels to check around the interpretationSpots (2 = 5x5 area, 3 = 7x7 area...)
-        th = 0.3
-        tileKMultiplier = 5
+        k = 25 #Pixels to check around the interpretationSpots (2 = 5x5 area, 3 = 7x7 area...)
+        th = 0.4
 
         prev = self.currentNode
         coords = list(self.currentPos)
         dir = self.currentDir
         tilesToUpdate = deque()
-        for pt in interpretationSpots[0:5]:
+        for i in range(0, 10, 2):
+            pt1 = interpretationSpots[i]
+            pt2 = interpretationSpots[i + 1]
+
             if(dir == 'u'):
                 coords[1] += 1
             elif (dir == 'd'):
@@ -329,15 +320,24 @@ class Labyrinth():
 
             current_coords = tuple(coords)
 
-            px, py = pt
-            y1 = max(0, py - (k * tileKMultiplier))
-            y2 = min(img.shape[0], py + (k * tileKMultiplier) + 1)
-            x1 = max(0, px - (k * tileKMultiplier))
-            x2 = min(img.shape[1], px + (k * tileKMultiplier) + 1)
-
+            tile = True
+            
+            px, py = pt1
+            y1 = max(0, py - (k * 5))
+            y2 = min(img.shape[0], py + (k * 5) + 1)
+            x1 = max(0, px - (k * 5))
+            x2 = min(img.shape[1], px + (k * 5) + 1)
             roi = img[y1:y2, x1:x2]
+            tile = np.mean(roi < 128) > 0.6
 
-            tile = np.mean(roi < 128) > 0.7
+            if(tile):
+                px, py = pt2
+                y1 = max(0, py - (k * 5))
+                y2 = min(img.shape[0], py + (k * 5) + 1)
+                x1 = max(0, px - (k * 5))
+                x2 = min(img.shape[1], px + (k * 5) + 1)
+                roi = img[y1:y2, x1:x2]
+                tile = np.mean(roi < 128) > 0.6
 
             if(tile):
                 if(current_coords not in self.map):
@@ -363,6 +363,7 @@ class Labyrinth():
             else:
                 break
 
+
         if dir == 'u' and prev.u is None: prev.u = 'Wall'
         elif dir == 'd' and prev.d is None: prev.d = 'Wall'
         elif dir == 'l' and prev.l is None: prev.l = 'Wall'
@@ -371,7 +372,7 @@ class Labyrinth():
         #Add Walls
         for i, t in enumerate(tilesToUpdate):
             #Left
-            px, py = interpretationSpots[i + 5]
+            px, py = interpretationSpots[i + 10]
 
             y1 = max(0, py - k)
             y2 = min(img.shape[0], py + k + 1)
@@ -380,9 +381,9 @@ class Labyrinth():
 
             roi = img[y1:y2, x1:x2]
 
-            is_wall = np.mean(roi > 128) > th
+            is_tile = np.mean(roi < 128) > th
 
-            if(is_wall):
+            if(not is_tile):
                 if(dir == 'u' and t.l is None):
                     t.l = 'Wall'
                 elif (dir == 'd' and t.r is None):
@@ -393,7 +394,7 @@ class Labyrinth():
                     t.u = 'Wall'
 
             #Right
-            px, py = interpretationSpots[i + 10]
+            px, py = interpretationSpots[i + 15]
             y1 = max(0, py - k)
             y2 = min(img.shape[0], py + k + 1)
             x1 = max(0, px - k)
@@ -401,9 +402,9 @@ class Labyrinth():
 
             roi = img[y1:y2, x1:x2]
 
-            is_wall = np.mean(roi > 128) > th
+            is_tile = np.mean(roi < 128) > th
 
-            if(is_wall):
+            if(not is_tile):
                 if(dir == 'u' and t.r is None):
                     t.r = 'Wall'
                 elif (dir == 'd' and t.l is None):
@@ -418,10 +419,26 @@ class Labyrinth():
             t = tilesToUpdate.pop()
             t.setTile(self)
 
+        # VIEW & SAVE DOTTED IMAGE
+        for i, pt in enumerate(interpretationSpots):
+            cv2.circle(
+                img,
+                tuple(pt.astype(int)),
+                k,
+                (0, 0, 255),
+                -1
+            )
+
+        output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
+        cv2.imwrite(output_path, img)
+        #cv2.imshow(imgName, img)
+        
+        cv2.waitKey(0)
+
         return self.selectNextPOI()
 
     def generateGT(self, imgName):
-        input_path = f"{Path(__file__).parent}/gt/{imgName}.jpg"
+        input_path = f"{Path(__file__).parent}/ground_truth/{imgName}.jpg"
         
         img = cv2.imread(input_path, 0)
         if img is None:
@@ -661,7 +678,11 @@ for i in range(60):
     if(gt == homo):
         correct += 1
     else:
+        print(f"Image {i}: ")
         print(find_wall_errors(labGT, labHomo))
      
 
 print(correct)
+
+print(homo)
+print(gt)
