@@ -188,6 +188,7 @@ class Labyrinth():
     def __init__(self, nOfQuests):
         self.map = {}
         self.poi = []
+        self.destinations = []
         
         self.remainingQuests = nOfQuests
         self.mapRemain = 36 #I assume that the map's always gonna be a 6x6
@@ -341,7 +342,7 @@ class Labyrinth():
         return self.goToPoi()
 
     def updateFromImage(self, imgName):
-        input_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBW.jpg"
+        input_path = f"{Path(__file__).parent}/testOutput/{imgName}_cenitalBW.jpg"
 
         img = cv2.imread(input_path)
         if img is None:
@@ -471,19 +472,19 @@ class Labyrinth():
             t.setTile(self)
 
         # VIEW & SAVE DOTTED IMAGE
-        # for i, pt in enumerate(interpretationSpots):
-        #     cv2.circle(
-        #         img,
-        #         tuple(pt.astype(int)),
-        #         k,
-        #         (0, 0, 255),
-        #         -1
-        #     )
+        for i, pt in enumerate(interpretationSpots):
+            cv2.circle(
+                img,
+                tuple(pt.astype(int)),
+                k,
+                (0, 0, 255),
+                -1
+            )
 
-        # output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
-        # cv2.imwrite(output_path, img)
-        #cv2.imshow(imgName, img)        
-        # cv2.waitKey(0)
+        output_path = f"{Path(__file__).parent}/testOutput/{imgName}_cenitalBWDotted.png"
+        cv2.imwrite(output_path, img)
+        cv2.imshow(imgName, img)        
+        cv2.waitKey(0)
 
         return self.selectNextPOI()
 
@@ -695,7 +696,7 @@ class Labyrinth():
             print(f"No se pudo cargar la imagen en {input_path}")
             exit()
 
-        results = model.predict(img, save=False, conf=0.3, verbose=False)
+        results = model.predict(img, save=True, project=f"{Path(__file__).parent}/testOutput/", name='example', conf=0.3, verbose=False)
 
         baseCoords = list(self.currentPos)
         baseDir = self.currentDir
@@ -816,7 +817,6 @@ def start():
 # print(f"Total accuracy: {correct/60}")
 
 lab = start()
-img = "img_36"
+img = "PrimeraCasilla"
 lab.updateFromImage(img)
-lab.identifyElements(img)
 print(lab.printLab())
