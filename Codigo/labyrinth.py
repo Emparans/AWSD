@@ -3,8 +3,59 @@ import numpy as np
 import cv2
 import json
 from pathlib import Path
+from ultralytics import YOLO
 
 dirs = ['u', 'r', 'd', 'l']
+
+NAMES_TO_TYPES = {
+    "interrogacion": "?",
+    "llave": "K",
+    "puerta": "D"
+}
+
+NAMES_TO_IDS = {
+    "sol" : "0",
+    "luna" : "1",
+    "estrella" : "2",
+    "nube" : "3"
+}
+
+ID_SYMBOLS = {
+    "0": "☼", "sol": "☼",
+    "1": "☾", "luna": "☾",     
+    "2": "★", "estrella": "★",  
+    "3": "☁", "nube": "☁"       
+}
+
+DISTANCES_DICTIONARY = {
+    "interrogacion": [2.826, 5.426, 8.026, 10.626, 13.226],
+    "llave": [2.742, 5.342, 7.942, 10.542, 13.142],
+    "puerta": [1.6, 4.2, 6.8, 9.4, 12.0]
+}
+
+OBJECT_METRICS = {
+    "interrogacion": {
+        "2.826": {"w_dif": 0.183, "w_med": 0.494, "h_dif": 0.195, "h_med": 0.349},
+        "5.426": {"w_dif": 0.098, "w_med": 0.268, "h_dif": 0.101, "h_med": 0.197},
+        "8.026": {"w_dif": 0.071, "w_med": 0.18, "h_dif": 0.075, "h_med": 0.134},
+        "10.626": {"w_dif": 0.049, "w_med": 0.139, "h_dif": 0.059, "h_med": 0.105},
+        "13.226": {"w_dif": 0.04, "w_med": 0.111, "h_dif": 0.043, "h_med": 0.085}
+    },
+    "llave": {
+        "2.742": {"w_dif": 0.002, "w_med": 0.115, "h_dif": 0.006, "h_med": 0.187},
+        "5.342": {"w_dif": 0.001, "w_med": 0.062, "h_dif": 0.002, "h_med": 0.103},
+        "7.942": {"w_dif": 0.001, "w_med": 0.042, "h_dif": 0.001, "h_med": 0.071},
+        "10.542": {"w_dif": 0.001, "w_med": 0.032, "h_dif": 0.001, "h_med": 0.054},
+        "13.142": {"w_dif": 0.001, "w_med": 0.026, "h_dif": 0.001, "h_med": 0.044}
+    },
+    "puerta": {
+        "1.6": {"w_dif": 0.0, "w_med": 1.0, "h_dif": 0.107, "h_med": 0.089},
+        "4.2": {"w_dif": 0.009, "w_med": 0.409, "h_dif": 0.026, "h_med": 0.185},
+        "6.8": {"w_dif": 0.002, "w_med": 0.242, "h_dif": 0.011, "h_med": 0.076},
+        "9.4": {"w_dif": 0.001, "w_med": 0.172, "h_dif": 0.006, "h_med": 0.041},
+        "12.0": {"w_dif": 0.001, "w_med": 0.133, "h_dif": 0.004, "h_med": 0.026}
+    }
+}
 
 interpretationSpots = np.array([
     #MIDDLE
@@ -66,7 +117,7 @@ class Node():
         self.mapped = False
 
         #Type related
-        self.typeTile = 'X' # X = not discovered, O = Empty, K = Key, D = Door, ? = Question
+        self.typeTile = 'X' # X = nothing K = Key, D = Door, ? = Question
         self.id = -1 # If it's a key or a door, it tracks the shape
         self.locked = False  # Just for doors, tracks its state
         self.dir = -1 # U = 0, R = 1, D = 2, L = 3, Relative to the map shown in web
@@ -269,9 +320,9 @@ class Labyrinth():
                     ppcomands.append([needed_turn, 0])
 
             #Will be updated elsewhere, in real time as the robot moves forward. This is only for debug purposes
-            self.currentNode = dest.tile
-            self.currentPos = dest.tile.coords
-            self.currentDir = dest.dirToLook
+            # self.currentNode = dest.tile
+            # self.currentPos = dest.tile.coords
+            # self.currentDir = dest.dirToLook
 
             return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]
 
@@ -420,20 +471,19 @@ class Labyrinth():
             t.setTile(self)
 
         # VIEW & SAVE DOTTED IMAGE
-        for i, pt in enumerate(interpretationSpots):
-            cv2.circle(
-                img,
-                tuple(pt.astype(int)),
-                k,
-                (0, 0, 255),
-                -1
-            )
+        # for i, pt in enumerate(interpretationSpots):
+        #     cv2.circle(
+        #         img,
+        #         tuple(pt.astype(int)),
+        #         k,
+        #         (0, 0, 255),
+        #         -1
+        #     )
 
-        output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
-        cv2.imwrite(output_path, img)
-        #cv2.imshow(imgName, img)
-        
-        cv2.waitKey(0)
+        # output_path = f"{Path(__file__).parent}/imagenesCenitales/{imgName}_cenitalBWDotted.png"
+        # cv2.imwrite(output_path, img)
+        #cv2.imshow(imgName, img)        
+        # cv2.waitKey(0)
 
         return self.selectNextPOI()
 
@@ -530,7 +580,6 @@ class Labyrinth():
             t.setTile(self)
             
     def printLab(self):
-        #FUNCIÓN GENERADA CON IA
         if not self.map:
             return "Empty Map"
 
@@ -538,7 +587,6 @@ class Labyrinth():
         max_x = max(x for x, y in self.map.keys())
         min_y = min(y for x, y in self.map.keys())
         max_y = max(y for x, y in self.map.keys())
-
 
         cols = (max_x - min_x + 1) * 4 + 1
         rows = (max_y - min_y + 1) * 2 + 1
@@ -553,17 +601,25 @@ class Labyrinth():
             cx = (x - min_x) * 4 + 2
             cy = (max_y - y) * 2 + 1
 
+            # Draw Corners
             grid[cy-1][cx-2] = '+'
             grid[cy-1][cx+2] = '+'
             grid[cy+1][cx-2] = '+'
             grid[cy+1][cx+2] = '+'
 
+            # Draw Center (Robot, POI, or empty space)
             if (x, y) == self.currentPos:
                 grid[cy][cx] = dir_chars.get(self.currentDir, 'R')
             elif (x, y) in poi_coords:
                 grid[cy][cx] = '*'
             else:
                 grid[cy][cx] = '.'
+
+            if node.typeTile != 'X':
+                grid[cy][cx-1] = node.typeTile
+                
+                if node.id != -1:
+                    grid[cy][cx+1] = ID_SYMBOLS.get(str(node.id), str(node.id))
 
             u_char = '-' if node.u == 'Wall' else '?' if node.u is None else ' '
             grid[cy-1][cx-1] = u_char
@@ -582,7 +638,7 @@ class Labyrinth():
             grid[cy][cx+2] = r_char
 
         return("\n".join("".join(row) for row in grid))
-
+    
     def toJSON(self):
         #FUNCIÓN GENERADA CON IA
         nodes_list = []
@@ -631,6 +687,62 @@ class Labyrinth():
 
         return json.dumps(payload, indent=2)            
 
+    def identifyElements(self, imgName):
+        input_path = f"{Path(__file__).parent}/testOutput/{imgName}_resized.jpg"
+        model = YOLO(f"{Path(__file__).parent}/deteccion_de_objetos/modelos/test_v5/weights/best.pt")
+        img = cv2.imread(input_path)
+        if img is None:
+            print(f"No se pudo cargar la imagen en {input_path}")
+            exit()
+
+        results = model.predict(img, save=False, conf=0.3, verbose=False)
+
+        baseCoords = list(self.currentPos)
+        baseDir = self.currentDir
+        nombres_clases = results[0].names
+        for box in results[0].boxes:
+            x_center, y_center, width, height = box.xywhn[0].tolist()
+
+            clase_id = int(box.cls[0].item())
+            nombreObj = nombres_clases[clase_id]
+            
+            nombreLimpio = nombreObj.split("_")[0]
+
+            distancia = estimar_distancia(nombreLimpio, [x_center, y_center, width, height])
+
+            if distancia is not None:
+                distancia_m = float(distancia)
+                celda = DISTANCES_DICTIONARY[nombreLimpio].index(distancia_m) + 1
+            else:
+                distancia_m = None
+                celda = None
+
+            if celda is not None:
+                if(baseDir == 'u'):
+                    c = (baseCoords[0], baseCoords[1] + celda)
+                elif(baseDir == 'd'):
+                    c = (baseCoords[0], baseCoords[1] - celda)
+                elif(baseDir == 'r'):
+                    c = (baseCoords[0] + celda, baseCoords[1])
+                elif(baseDir == 'l'):
+                    c = (baseCoords[0] - celda, baseCoords[1])
+
+                typeTile = NAMES_TO_TYPES[nombreLimpio]
+                while(c not in self.map and (typeTile == 'K' or typeTile == '?')):
+                    if baseDir == 'u':
+                        c = (c[0], c[1] - 1)
+                    elif baseDir == 'd':
+                        c = (c[0], c[1] + 1)
+                    elif baseDir == 'r':
+                        c = (c[0] - 1, c[1])
+                    elif baseDir == 'l':
+                        c = (c[0] + 1, c[1])
+
+                self.map[c].typeTile = typeTile
+                if(typeTile == 'K' or typeTile == 'D'):
+                    self.map[c].id = NAMES_TO_IDS[nombreObj.split("_")[1]]
+
+
 def find_wall_errors(labGT, labHomo):
     errors = []
     
@@ -650,6 +762,25 @@ def find_wall_errors(labGT, labHomo):
                 
     return errors
 
+def estimar_distancia(clase, bbox):
+    x, y, w, h = bbox
+    margen = 0.01
+
+    if abs(x - 0.5) > 0.15:
+      return None
+
+    for distancia_real in reversed(list(OBJECT_METRICS[clase])):
+      wMed = OBJECT_METRICS[clase][distancia_real]["w_med"]
+      wDif = OBJECT_METRICS[clase][distancia_real]["w_dif"]
+
+      hMed = OBJECT_METRICS[clase][distancia_real]["h_med"]
+      hDif = OBJECT_METRICS[clase][distancia_real]["h_dif"]
+
+      if abs(w - wMed) <= ((wDif / 2)+ margen) and abs(h - hMed) <= ((hDif / 2)+ margen):
+          return distancia_real
+
+    return None
+
 def start():      
     lab = Labyrinth(3)
     iN = Node()
@@ -661,28 +792,31 @@ def start():
     iN.setTile(lab)
     return lab
 
-correct = 0
+# correct = 0
 
-for i in range(60):
-    imgs = f"img_{i}"
-    labHomo = start()
-    labGT = start()
+# for i in range(60):
+#     imgs = f"img_{i}"
+#     labHomo = start()
+#     labGT = start()
 
-    labGT.generateGT(imgs)
-    gt = labGT.printLab()
+#     labGT.generateGT(imgs)
+#     gt = labGT.printLab()
 
-    labHomo.updateFromImage(imgs)
-    labHomo.currentDir = 'r'
-    homo = labHomo.printLab()
+#     labHomo.updateFromImage(imgs)
+#     labHomo.currentDir = 'r'
+#     homo = labHomo.printLab()
 
-    if(gt == homo):
-        correct += 1
-    else:
-        print(f"Image {i}: ")
-        print(find_wall_errors(labGT, labHomo))
+#     if(gt == homo):
+#         correct += 1
+#     else:
+#         print(f"Image {i}: ")
+#         print(find_wall_errors(labGT, labHomo))
      
 
-print(correct)
+# print(f"Total accuracy: {correct/60}")
 
-print(homo)
-print(gt)
+lab = start()
+img = "img_36"
+lab.updateFromImage(img)
+lab.identifyElements(img)
+print(lab.printLab())
