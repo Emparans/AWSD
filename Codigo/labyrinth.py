@@ -114,7 +114,6 @@ class Node():
         self.u = self.d = self.l = self.r  = None
         self.tile = -1 # Shape of walls to show on map
         self.explored = False
-        self.mapped = False
 
         #Type related
         self.typeTile = 'X' # X = nothing K = Key, D = Door, ? = Question
@@ -128,7 +127,6 @@ class Node():
 
     def connect(self, x, y):
         self.coords = (x, y)
-        self.explored = True
 
     def setTile(self, lab):
         x, y = self.coords
@@ -169,11 +167,12 @@ class Node():
             
 
 class POI():
-    def __init__(self, tile, dirToLook):
+    def __init__(self, tile, dirToLook, h = -1):
         self.tile = tile
         self.dirToLook = dirToLook #U, D, L, R
-        self.h = -1
+        self.h = h
         self.time = 0
+        self.type = -1
 
     def calculateHeuristic(self, currentNode):
         tx, ty = self.tile.coords
@@ -184,11 +183,13 @@ class POI():
         self.time += 1
 
 
+
 class Labyrinth():
     def __init__(self, nOfQuests):
         self.map = {}
         self.poi = []
-        self.destinations = []
+        self.prioritypoi = []
+        self.foundIDs = []
         
         self.remainingQuests = nOfQuests
         self.mapRemain = 36 #I assume that the map's always gonna be a 6x6
@@ -200,17 +201,24 @@ class Labyrinth():
         self.currentNode = None
         self.held = -1 # Id of the key the robot is carrying, -1 if none
 
-    def addPOI(self, tile, dirToLook):
-        if not any(p.tile == tile and p.dirToLook == dirToLook for p in self.poi):
-            self.poi.append(POI(tile, dirToLook))
+    def addPOI(self, tile, dirToLook, isID = False):
+        if(isID):
+            if not any(p.tile == tile for p in self.foundIDs):
+                self.foundIDs.append(POI(tile, dirToLook, 1))
+        else:
+            if not any(p.tile == tile and p.dirToLook == dirToLook for p in self.poi):
+                self.poi.append(POI(tile, dirToLook))
 
     def goToPoi(self):
-        if not self.poi:
-            return []
+        if not self.poi and not self.prioritypoi:
+            return 'X', []
 
-        dest = self.poi.pop(0)
+        if(len(self.prioritypoi) > 0):
+            dest = self.prioritypoi.pop(0)
+        else:
+            dest = self.poi.pop(0)
 
-        if getattr(dest.tile, dest.dirToLook) is not None:
+        if dest.tile.typeTile == 'X' and getattr(dest.tile, dest.dirToLook) is not None:
             return self.goToPoi()
 
         for m in self.map.values():
@@ -324,21 +332,23 @@ class Labyrinth():
             # self.currentNode = dest.tile
             # self.currentPos = dest.tile.coords
             # self.currentDir = dest.dirToLook
-
-            return ppcomands # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]
+            
+            # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]. We first send the typeTile though, to know what to do next.
+            return dest.tile.typeTile, ppcomands #The typeTiles 'X' and 'D' should expect an image later, the other 2 just select the next POI and keep going.
 
         else:
             print(f"Camí de {self.currentNode} cap a {dest.tile} no trobat.")
             return self.selectNextPOI()        
             
     def selectNextPOI(self):
-        if(len(self.poi) == 0):
-            return None
+        if(not self.poi and not self.prioritypoi):
+            return ('X', [])
         
         for p in self.poi:
             p.calculateHeuristic(self.currentNode)
             
         self.poi.sort(key=lambda x: x.h, reverse=False)
+        self.prioritypoi.sort(key=lambda x: x.h, reverse=False)
         return self.goToPoi()
 
     def updateFromImage(self, imgName):
@@ -472,21 +482,21 @@ class Labyrinth():
             t.setTile(self)
 
         # VIEW & SAVE DOTTED IMAGE
-        for i, pt in enumerate(interpretationSpots):
-            cv2.circle(
-                img,
-                tuple(pt.astype(int)),
-                k,
-                (0, 0, 255),
-                -1
-            )
+        # for i, pt in enumerate(interpretationSpots):
+        #     cv2.circle(
+        #         img,
+        #         tuple(pt.astype(int)),
+        #         k,
+        #         (0, 0, 255),
+        #         -1
+        #     )
 
-        output_path = f"{Path(__file__).parent}/testOutput/{imgName}_cenitalBWDotted.png"
-        cv2.imwrite(output_path, img)
-        cv2.imshow(imgName, img)        
-        cv2.waitKey(0)
+        # output_path = f"{Path(__file__).parent}/testOutput/{imgName}_cenitalBWDotted.png"
+        # cv2.imwrite(output_path, img)
+        # cv2.imshow(imgName, img)        
+        # cv2.waitKey(0)
 
-        return self.selectNextPOI()
+        return
 
     def generateGT(self, imgName):
         input_path = f"{Path(__file__).parent}/ground_truth/{imgName}.jpg"
@@ -652,7 +662,6 @@ class Labyrinth():
             nodes_list.append({
                 "coords": list(coords),
                 "explored": node.explored,
-                "mapped": node.mapped,
                 "typeTile": node.typeTile,
                 "id": node.id,
                 "locked": node.locked,
@@ -699,9 +708,11 @@ class Labyrinth():
         results = model.predict(img, save=True, project=f"{Path(__file__).parent}/testOutput/", name='example', conf=0.3, verbose=False)
 
         baseCoords = list(self.currentPos)
-        baseDir = self.currentDir
         nombres_clases = results[0].names
+        mostRestrictiveDoor = 5
+        elements = []
         for box in results[0].boxes:
+            e = {}
             x_center, y_center, width, height = box.xywhn[0].tolist()
 
             clase_id = int(box.cls[0].item())
@@ -719,30 +730,101 @@ class Labyrinth():
                 celda = None
 
             if celda is not None:
-                if(baseDir == 'u'):
+                if(self.currentDir == 'u'):
                     c = (baseCoords[0], baseCoords[1] + celda)
-                elif(baseDir == 'd'):
+                elif(self.currentDir == 'd'):
                     c = (baseCoords[0], baseCoords[1] - celda)
-                elif(baseDir == 'r'):
+                elif(self.currentDir == 'r'):
                     c = (baseCoords[0] + celda, baseCoords[1])
-                elif(baseDir == 'l'):
+                elif(self.currentDir == 'l'):
                     c = (baseCoords[0] - celda, baseCoords[1])
 
                 typeTile = NAMES_TO_TYPES[nombreLimpio]
-                while(c not in self.map and (typeTile == 'K' or typeTile == '?')):
-                    if baseDir == 'u':
-                        c = (c[0], c[1] - 1)
-                    elif baseDir == 'd':
-                        c = (c[0], c[1] + 1)
-                    elif baseDir == 'r':
-                        c = (c[0] - 1, c[1])
-                    elif baseDir == 'l':
-                        c = (c[0] + 1, c[1])
-
-                self.map[c].typeTile = typeTile
                 if(typeTile == 'K' or typeTile == 'D'):
-                    self.map[c].id = NAMES_TO_IDS[nombreObj.split("_")[1]]
+                    id  = NAMES_TO_IDS[nombreObj.split("_")[1]]
+                else:
+                    id = -1
 
+                if(typeTile == 'D'):
+                    if(self.currentDir == 'u' or self.currentDir == 'd'):
+                        distToDoor = abs(c[1] - baseCoords[1])
+                    else:
+                        distToDoor = abs(c[0] - baseCoords[0])
+
+                    mostRestrictiveDoor = min(mostRestrictiveDoor, distToDoor)
+
+                e["c"] = c
+                e["type"] = typeTile
+                e["id"] = id
+
+                elements.append(e)
+        
+        return mostRestrictiveDoor, elements
+                
+
+    def correct(self, mostRestrictiveDoor, elements):
+        baseCoords = list(self.currentPos)
+        for i in range(mostRestrictiveDoor + 1):
+            if(self.currentDir == 'u'):
+                baseCoords[1] += 1
+            elif(self.currentDir == 'd'):
+                baseCoords[1] -= 1
+            elif(self.currentDir == 'r'):
+                baseCoords[0] += 1
+            elif(self.currentDir == 'l'):
+                baseCoords[0] -= 1
+
+            coords = tuple(baseCoords)
+            if coords in self.map:
+                self.map[coords].explored = True
+            else:
+                break
+
+        if not elements:
+            return
+
+        for e in elements:
+            c = e["c"]
+            typeTile = e["type"]
+            id = e["id"]
+
+            while(c not in self.map and (typeTile == 'K' or typeTile == '?')):
+                if self.currentDir == 'u':
+                    c = (c[0], c[1] - 1)
+                elif self.currentDir == 'd':
+                    c = (c[0], c[1] + 1)
+                elif self.currentDir == 'r':
+                    c = (c[0] - 1, c[1])
+                elif self.currentDir == 'l':
+                    c = (c[0] + 1, c[1])
+
+            if(c in self.map and self.map[c].explored and self.map[c].typeTile == 'X'):
+                self.map[c].typeTile = typeTile
+
+                if (typeTile == 'K' or typeTile == 'D') and self.map[c].id == -1:
+                    self.map[c].id = id
+
+                    pair = False
+                    for fID in self.foundIDs:
+                        if fID.tile.id == id and typeTile == 'K':
+                            self.prioritypoi.append(POI(self.map[c], self.currentDir, 1))
+                            self.prioritypoi.append(fID)
+                            self.foundIDs.remove(fID)
+                            pair = True
+                            break
+
+                        elif fID.tile.id == id and typeTile == 'D':
+                            self.prioritypoi.append(fID)
+                            self.prioritypoi.append(POI(self.map[c], self.currentDir, 1))
+                            self.foundIDs.remove(fID)
+                            pair = True
+                            break
+
+                    if pair is False:
+                        self.addPOI(self.map[c], self.currentDir, True)
+                        
+                else:
+                    self.prioritypoi.append(POI(self.map[c], self.currentDir, 0))
 
 def find_wall_errors(labGT, labHomo):
     errors = []
@@ -785,6 +867,7 @@ def estimar_distancia(clase, bbox):
 def start():      
     lab = Labyrinth(3)
     iN = Node()
+    iN.explored = True
     lab.currentNode = iN
     lab.map[(0, 0)] = iN
     iN.connect(0, 0)
@@ -816,7 +899,15 @@ def start():
 
 # print(f"Total accuracy: {correct/60}")
 
+#Called whenever we get an image to analyze (aka b/w homography + reduced image for yolo)
+def analyze(lab, imgName):
+    mostRestrictiveDoor, elements = lab.identifyElements(imgName)
+    lab.updateFromImage(imgName)
+    lab.correct(mostRestrictiveDoor, elements)
+    destinationType, finalCommands = lab.selectNextPOI()
+    #print(lab.printLab())
+
+    #We send destinationType and finalCommands this to the robot here
+
 lab = start()
-img = "PrimeraCasilla"
-lab.updateFromImage(img)
-print(lab.printLab())
+analyze(lab, "PrimeraCasilla")
