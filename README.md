@@ -35,7 +35,7 @@ Durante la exploración, AWSD encuentra distintos retos en forma de preguntas o 
 | **Solenoide 5V** | ![Selenoide](fotos_proyecto/Selenoide.png) | Actuador lineal para interactuar con los mecanismos del entorno. | [Ver Tienda](https://tienda.bricogeek.com/componentes/430-solenoide-5v.html) |
 | **Módulo Relé** | ![Relé](fotos_proyecto/Relé.png) | Permite controlar el encendido del solenoide de forma segura. | [Ver Tienda](https://tienda.bricogeek.com/interruptores/1352-modulo-rele-5v.html) |
 | **Controlador TB6612FNG** | ![ControladoraMotores](fotos_proyecto/Controladora_Motores.png) | Driver encargado de gestionar el sentido y velocidad de los motores. | [Ver Tienda](https://tienda.bricogeek.com/controladores-motores/999-controlador-de-motores-tb6612fng.html) |
-| **Batería Externa Anker** | ![BateriaExterna](fotos_proyecto/BateriaExterna.png) | Powerbank Slim encargada de alimentar la Raspberry Pi. | [Ver Amazon](https://www.amazon.es/Anker-PowerCore-Magnetic-Slim-B2C/dp/B099284SRR/) |
+| **Batería Externa Anker** | ![BateriaExterna](fotos_proyecto/BateriaExterna.png) | Powerbank Slim encargada de alimentar la Raspberry Pi. | [Ver Tienda](https://www.amazon.es/Anker-PowerCore-Magnetic-Slim-B2C/dp/B099284SRR/) |
 | **Porta Pilas 4xAA** | ![PortaPilas](fotos_proyecto/PortaPilas.png) | Soporte de baterías para la alimentación externa de los motores. | [Ver Tienda](https://tienda.bricogeek.com/componentes/160-base-para-baterias-4xaa.html) |
 | **Mini Protoboard** | ![Protoboard](fotos_proyecto/Protoboard.png) | Placa de pruebas para realizar las conexiones eléctricas. | [Ver Tienda](https://tienda.bricogeek.com/herramientas-de-prototipado/211-mini-breadboard-adhesiva.html) |
 | **Ruedas (80x10mm)** | ![Ruedas](fotos_proyecto/Ruedas.png) | Pareja de ruedas principales acopladas a los motores N20. | [Ver Tienda](https://tienda.bricogeek.com/robotica/303-pareja-de-ruedas-80x10mm-blanco.html) |
@@ -98,6 +98,7 @@ Diagrama general de la arquitectura software del proyecto.
 |---|---|
 | Joan Aguilar Vilalta | [@JoanAV-H](https://github.com/JoanAV-H) |
 | Gerard Benet Martinez | [@Gemarcx](https://github.com/Gemarcx) |
+| Martí Barrio Galobardes | [@MBGit05](https://github.com/MBGit05) |
 | Javier Emparan Lopez | [@Emparans](https://github.com/Emparans) |
 
 ---
