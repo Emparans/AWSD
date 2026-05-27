@@ -6,7 +6,7 @@
 ---
 
 <div align="center">
-  <img src="fotos_proyecto/fotos_proyecto/Logo.jpeg" alt="LogoProyecto" width="500"/>
+  <img src="fotos_proyecto/Logo.jpeg" alt="LogoProyecto" width="500"/>
 </div>
 
 
@@ -48,7 +48,7 @@ Durante la exploración, AWSD encuentra distintos retos en forma de preguntas o 
 Diagrama de conexiones del sistema electrónico del robot.
 
 <div align="center">
-  <img src="fotos_proyecto/fotos_proyecto/EsquemaElectrico.png" alt="EsquemaElectrico" width="500"/>
+  <img src="fotos_proyecto/EsquemaElectrico.png" alt="EsquemaElectrico" width="500"/>
 </div>
 
 ---
@@ -58,7 +58,7 @@ Diagrama de conexiones del sistema electrónico del robot.
 Diseño 3D del chasis y componentes mecánicos del robot.
 
 <div align="center">
-  <img src="fotos_proyecto/fotos_proyecto/Modelo3D.jpeg" alt="Modelo3D" width="500"/>
+  <img src="fotos_proyecto/Modelo3D.jpeg" alt="Modelo3D" width="500"/>
 </div>
 
 ---
@@ -68,7 +68,7 @@ Diseño 3D del chasis y componentes mecánicos del robot.
 Diagrama general de la arquitectura software del proyecto.
 
 <div align="center">
-  <img src="fotos_proyecto/fotos_proyecto/Esquema.png" alt="Esquema" width="500"/>
+  <img src="fotos_proyecto/Esquema.png" alt="Esquema" width="500"/>
 </div>
 
 ---
