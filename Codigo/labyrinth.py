@@ -112,7 +112,6 @@ class Node():
     def __init__(self):
         #Basic
         self.u = self.d = self.l = self.r  = None
-        self.tile = -1 # Shape of walls to show on map
         self.explored = False
 
         #Type related
@@ -159,13 +158,6 @@ class Node():
             else:
                 lab.addPOI(self, 'r')
 
-        self.tile = 0
-        if self.u == 'Wall': self.tile += 1
-        if self.r == 'Wall': self.tile += 2
-        if self.d == 'Wall': self.tile += 4
-        if self.l == 'Wall': self.tile += 8
-            
-
 class POI():
     def __init__(self, tile, dirToLook, h = -1):
         self.tile = tile
@@ -181,8 +173,6 @@ class POI():
         timeScaleFactor = np.sqrt(2) / 8
         self.h = max( dist - (timeScaleFactor * self.time), 0)
         self.time += 1
-
-
 
 class Labyrinth():
     def __init__(self, nOfQuests):
@@ -329,9 +319,9 @@ class Labyrinth():
                     ppcomands.append([needed_turn, 0])
 
             #Will be updated elsewhere, in real time as the robot moves forward. This is only for debug purposes
-            # self.currentNode = dest.tile
-            # self.currentPos = dest.tile.coords
-            # self.currentDir = dest.dirToLook
+            self.currentNode = dest.tile
+            self.currentPos = dest.tile.coords
+            self.currentDir = dest.dirToLook
             
             # We will send this to the robot. The output looks like: [['r', 2], ['r', 1], ['l', 3]]. We first send the typeTile though, to know what to do next.
             return dest.tile.typeTile, ppcomands #The typeTiles 'X' and 'D' should expect an image later, the other 2 just select the next POI and keep going.
@@ -609,6 +599,9 @@ class Labyrinth():
         dir_chars = {'u': '^', 'd': 'v', 'l': '<', 'r': '>'}
 
         for (x, y), node in self.map.items():
+            if node.explored == False:
+                continue
+
             cx = (x - min_x) * 4 + 2
             cy = (max_y - y) * 2 + 1
 
@@ -651,13 +644,13 @@ class Labyrinth():
         return("\n".join("".join(row) for row in grid))
     
     def toJSON(self):
-        #FUNCIÓN GENERADA CON IA
         nodes_list = []
         for coords, node in self.map.items():
-            def parse_boundary(b):
-                if b == 'Wall': return 'Wall'
-                if b is None: return None
-                return 'Node'
+            sprite = 0
+            if node.u == 'Wall': sprite += 1
+            if node.r == 'Wall': sprite += 2
+            if node.d == 'Wall': sprite += 4
+            if node.l == 'Wall': sprite += 8
 
             nodes_list.append({
                 "coords": list(coords),
@@ -665,20 +658,13 @@ class Labyrinth():
                 "typeTile": node.typeTile,
                 "id": node.id,
                 "locked": node.locked,
-                "boundaries": {
-                    "u": parse_boundary(node.u),
-                    "d": parse_boundary(node.d),
-                    "l": parse_boundary(node.l),
-                    "r": parse_boundary(node.r)
-                }
+                "sprite": sprite
             })
 
-        pois_list = []
-        for p in self.poi:
-            pois_list.append({
-                "targetCoords": list(p.tile.coords),
-                "dirToLook": p.dirToLook
-            })
+        pois_list = [{
+            "targetCoords": list(p.tile.coords),
+            "dirToLook": p.dirToLook
+        } for p in self.poi]
 
         payload = {
             "state": {
@@ -695,7 +681,7 @@ class Labyrinth():
             "pois": pois_list
         }
 
-        return json.dumps(payload, indent=2)            
+        return json.dumps(payload, indent=2)      
 
     def identifyElements(self, imgName):
         input_path = f"{Path(__file__).parent}/testOutput/{imgName}_resized.jpg"
@@ -705,7 +691,7 @@ class Labyrinth():
             print(f"No se pudo cargar la imagen en {input_path}")
             exit()
 
-        results = model.predict(img, save=True, project=f"{Path(__file__).parent}/testOutput/", name='example', conf=0.3, verbose=False)
+        results = model.predict(img, save=False, project=f"{Path(__file__).parent}/testOutput/", name='example', conf=0.3, verbose=False)
 
         baseCoords = list(self.currentPos)
         nombres_clases = results[0].names
@@ -764,7 +750,7 @@ class Labyrinth():
 
     def correct(self, mostRestrictiveDoor, elements):
         baseCoords = list(self.currentPos)
-        for i in range(mostRestrictiveDoor + 1):
+        for i in range(mostRestrictiveDoor):
             if(self.currentDir == 'u'):
                 baseCoords[1] += 1
             elif(self.currentDir == 'd'):
@@ -905,9 +891,22 @@ def analyze(lab, imgName):
     lab.updateFromImage(imgName)
     lab.correct(mostRestrictiveDoor, elements)
     destinationType, finalCommands = lab.selectNextPOI()
-    #print(lab.printLab())
+    # print(lab.printLab())
 
     #We send destinationType and finalCommands this to the robot here
 
 lab = start()
-analyze(lab, "PrimeraCasilla")
+analyze(lab, "img_5")
+analyze(lab, "img_28")
+analyze(lab, "wall")
+analyze(lab, "wall")
+analyze(lab, "img_23")
+analyze(lab, "img_7")
+analyze(lab, "img_7")
+
+print(lab.printLab())
+print(lab.toJSON())
+
+
+
+
