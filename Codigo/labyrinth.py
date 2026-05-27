@@ -341,7 +341,7 @@ class Labyrinth():
         self.prioritypoi.sort(key=lambda x: x.h, reverse=False)
         return self.goToPoi()
 
-    def updateFromImage(self, imgName):
+    def updateFromImage(self, imgName, mostRestrictiveDoor):
         input_path = f"{Path(__file__).parent}/testOutput/{imgName}_cenitalBW.jpg"
 
         img = cv2.imread(input_path)
@@ -357,7 +357,8 @@ class Labyrinth():
         coords = list(self.currentPos)
         dir = self.currentDir
         tilesToUpdate = deque()
-        for i in range(0, 10, 2):
+        maxdist = min(5, mostRestrictiveDoor)
+        for i in range(0, 2*maxdist, 2):
             pt1 = interpretationSpots[i]
             pt2 = interpretationSpots[i + 1]
 
@@ -416,10 +417,10 @@ class Labyrinth():
                 break
 
 
-        if dir == 'u' and prev.u is None: prev.u = 'Wall'
-        elif dir == 'd' and prev.d is None: prev.d = 'Wall'
-        elif dir == 'l' and prev.l is None: prev.l = 'Wall'
-        elif dir == 'r' and prev.r is None: prev.r = 'Wall'
+        if   dir == 'u' and prev.u is None and maxdist == 5: prev.u = 'Wall'
+        elif dir == 'd' and prev.d is None and maxdist == 5: prev.d = 'Wall'
+        elif dir == 'l' and prev.l is None and maxdist == 5: prev.l = 'Wall'
+        elif dir == 'r' and prev.r is None and maxdist == 5: prev.r = 'Wall'
 
         #Add Walls
         for i, t in enumerate(tilesToUpdate):
@@ -653,7 +654,7 @@ class Labyrinth():
             if node.l == 'Wall': sprite += 8
 
             nodes_list.append({
-                "coords": list(coords),
+                "coords": list((coords[0], coords[1])),
                 "explored": node.explored,
                 "typeTile": node.typeTile,
                 "id": node.id,
@@ -853,13 +854,13 @@ def estimar_distancia(clase, bbox):
 def start():      
     lab = Labyrinth(3)
     iN = Node()
-    iN.explored = True
     lab.currentNode = iN
     lab.map[(0, 0)] = iN
     iN.connect(0, 0)
     lab.mapRemain -= 1
 
     iN.setTile(lab)
+    iN.explored = True
     return lab
 
 # correct = 0
@@ -888,7 +889,7 @@ def start():
 #Called whenever we get an image to analyze (aka b/w homography + reduced image for yolo)
 def analyze(lab, imgName):
     mostRestrictiveDoor, elements = lab.identifyElements(imgName)
-    lab.updateFromImage(imgName)
+    lab.updateFromImage(imgName, mostRestrictiveDoor)
     lab.correct(mostRestrictiveDoor, elements)
     destinationType, finalCommands = lab.selectNextPOI()
     # print(lab.printLab())
@@ -897,16 +898,6 @@ def analyze(lab, imgName):
 
 lab = start()
 analyze(lab, "img_5")
-analyze(lab, "img_28")
-analyze(lab, "wall")
-analyze(lab, "wall")
-analyze(lab, "img_23")
-analyze(lab, "img_7")
-analyze(lab, "img_7")
 
 print(lab.printLab())
 print(lab.toJSON())
-
-
-
-
