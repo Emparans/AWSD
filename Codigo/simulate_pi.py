@@ -1,8 +1,9 @@
 import requests
 from pathlib import Path
+import time
 
 # Change this to your VM's public IP when deploying 
-SERVER_URL = "http://34.175.45.244:8080/raspberry/analyze"
+SERVER_URL = "http://34.0.201.131:8080/raspberry"
 
 def send_robot_step(img_base_name, image_folder="."):
     """
@@ -12,9 +13,9 @@ def send_robot_step(img_base_name, image_folder="."):
     print(f"Enviando datos al servidor para el paso: {img_base_name}...")
     
     # 1. Automatically construct the expected file paths
-    path_cenital = f"{Path(__file__).parent}/{img_base_name}_cenitalBW.jpg"
+    path_cenital = f"{Path(__file__).parent}/testOutput/{img_base_name}_cenitalBW.jpg"
     
-    path_resized = f"{Path(__file__).parent}/{img_base_name}_resized.jpg"
+    path_resized = f"{Path(__file__).parent}/testOutput/{img_base_name}_resized.jpg"
     
     try:
         # 2. Open the image files using the generated paths
@@ -30,7 +31,7 @@ def send_robot_step(img_base_name, image_folder="."):
             }
             
             # 3. Make the POST request
-            response = requests.post(SERVER_URL, files=files, data=data)
+            response = requests.post(f"{SERVER_URL}/analyze", files=files, data=data)
             
             if response.status_code == 200:
                 print("✅ Análisis completado con éxito!")
@@ -45,5 +46,50 @@ def send_robot_step(img_base_name, image_folder="."):
     except requests.exceptions.ConnectionError:
         print("❌ Error: No se pudo conectar al servidor. ¿Está encendido FastAPI?")
 
+def send_reset_command():
+    """
+    Sends a POST request to the server to wipe the map memory 
+    and return the robot to the starting origin (0,0).
+    """
+    print("Enviando comando de reinicio al servidor...")
+    
+    reset_url = f"{SERVER_URL}/reset" 
+    
+    try:
+        # We don't need to send any files or data payload for this one!
+        response = requests.post(reset_url)
+        
+        if response.status_code == 200:
+            print("✅ ¡Mapa reseteado con éxito!")
+            resultado = response.json()
+            print(f"➡ Mensaje del servidor: {resultado.get('message')}")
+        else:
+            print(f"❌ Error del servidor ({response.status_code}): {response.text}")
+            
+    except requests.exceptions.ConnectionError:
+        print("❌ Error: No se pudo conectar al servidor. ¿Está encendido FastAPI?")
+
 if __name__ == "__main__":
-    send_robot_step(img_base_name="img_5")
+    send_reset_command()
+    time.sleep(1)
+    send_robot_step("img_28")
+    time.sleep(1)
+    send_robot_step("img_3")
+    time.sleep(1)
+    send_robot_step("wall")
+    time.sleep(1)
+    send_robot_step("wall")
+    time.sleep(1)
+    send_robot_step("img_23")
+    time.sleep(1)
+    send_robot_step("img_31")
+    time.sleep(1)
+    send_robot_step("wall")
+    time.sleep(1)
+    send_robot_step("img_53")
+    time.sleep(1)
+    send_robot_step("wall")
+    time.sleep(1)
+    send_robot_step("img_34")
+
+

@@ -136,6 +136,7 @@ class Node():
                 neighbor.d = self
             else:
                 lab.addPOI(self, 'u')
+
         if(self.d == None):
             if((x, y - 1) in lab.map):
                 neighbor = lab.map[(x, y - 1)]
@@ -350,7 +351,7 @@ class Labyrinth():
             exit()
 
         #Process path
-        k = 25 #Pixels to check around the interpretationSpots (2 = 5x5 area, 3 = 7x7 area...)
+        k = 25 #Pixels to check around the interpretationSpots (2 = 5x5 area, 3 = 7x7 area, 25 = 51x51...)
         th = 0.4
 
         prev = self.currentNode
@@ -488,98 +489,6 @@ class Labyrinth():
         # cv2.waitKey(0)
 
         return
-
-    def generateGT(self, imgName):
-        input_path = f"{Path(__file__).parent}/ground_truth/{imgName}.jpg"
-        
-        img = cv2.imread(input_path, 0)
-        if img is None:
-            print(f"No se pudo cargar la imagen en {input_path}")
-            exit()
-
-        kernel = np.ones((7,7), np.uint8)
-        img = cv2.morphologyEx(img, cv2.MORPH_DILATE, kernel)
-
-        # VIEW & SAVE DOTTED IMAGE
-        # for i, pt in enumerate(interpretationSpotsGT):
-        #     cv2.circle(
-        #         img,
-        #         tuple(pt.astype(int)),
-        #         7,
-        #         (0, 0, 255),
-        #         -1
-        #     )
-
-        # output_path = f"{Path(__file__).parent}/gt/{imgName}_Dotted.png"
-        # cv2.imwrite(output_path, img)
-        # cv2.imshow("gt", img)
-        
-        # cv2.waitKey(0)
-
-        dir = self.currentDir 
-        coords = list(self.currentPos)
-        prev = self.currentNode
-        
-        tilesToUpdate = deque()
-
-        for i in range(5):
-            if dir == 'r': coords[0] += 1
-            elif dir == 'l': coords[0] -= 1
-            elif dir == 'u': coords[1] += 1
-            elif dir == 'd': coords[1] -= 1
-            
-            current_coords = tuple(coords)
-            
-            if current_coords not in self.map:
-                n = Node()
-                self.map[current_coords] = n
-                n.connect(current_coords[0], current_coords[1])
-                self.mapRemain -= 1
-            else:
-                n = self.map[current_coords]
-
-            setattr(prev, dir, n)
-            if dir == 'r': n.l = prev
-            elif dir == 'l': n.r = prev
-            elif dir == 'u': n.d = prev
-            elif dir == 'd': n.u = prev
-            
-            px_l, py_l = interpretationSpotsGT[i + 5]
-            px_r, py_r = interpretationSpotsGT[i + 10]
-            
-            if img[py_l, px_l] > 128:
-                if dir == 'r': n.u = 'Wall'
-                elif dir == 'l': n.d = 'Wall'
-                elif dir == 'u': n.l = 'Wall'
-                elif dir == 'd': n.r = 'Wall'
-
-            if img[py_r, px_r] > 128:
-                if dir == 'r': n.d = 'Wall'
-                elif dir == 'l': n.u = 'Wall'
-                elif dir == 'u': n.r = 'Wall'
-                elif dir == 'd': n.l = 'Wall'
-
-            tilesToUpdate.append(n)
-
-            px_m, py_m = interpretationSpotsGT[i]
-            
-            if img[py_m, px_m] > 128:
-                if dir == 'r': n.r = 'Wall'
-                elif dir == 'l': n.l = 'Wall'
-                elif dir == 'u': n.u = 'Wall'
-                elif dir == 'd': n.d = 'Wall'
-                break
-                
-            prev = n
-
-        if dir == 'u' and prev.u is None: prev.u = 'Wall'
-        elif dir == 'd' and prev.d is None: prev.d = 'Wall'
-        elif dir == 'l' and prev.l is None: prev.l = 'Wall'
-        elif dir == 'r' and prev.r is None: prev.r = 'Wall'
-
-        while len(tilesToUpdate) > 0:
-            t = tilesToUpdate.pop()
-            t.setTile(self)
             
     def printLab(self):
         if not self.map:
@@ -662,11 +571,6 @@ class Labyrinth():
                 "sprite": sprite
             })
 
-        pois_list = [{
-            "targetCoords": list(p.tile.coords),
-            "dirToLook": p.dirToLook
-        } for p in self.poi]
-
         payload = {
             "state": {
                 "remainingQuests": self.remainingQuests,
@@ -679,14 +583,13 @@ class Labyrinth():
                 "held": self.held
             },
             "nodes": nodes_list,
-            "pois": pois_list
         }
 
         return json.dumps(payload, indent=2)      
 
     def identifyElements(self, imgName):
         input_path = f"{Path(__file__).parent}/testOutput/{imgName}_resized.jpg"
-        model = YOLO(f"{Path(__file__).parent}/deteccion_de_objetos/modelos/test_v5/weights/best.pt")
+        model = YOLO(f"{Path(__file__).parent}/test_v5/weights/best.pt")
         img = cv2.imread(input_path)
         if img is None:
             print(f"No se pudo cargar la imagen en {input_path}")
@@ -788,21 +691,29 @@ class Labyrinth():
             if(c in self.map and self.map[c].explored and self.map[c].typeTile == 'X'):
                 self.map[c].typeTile = typeTile
 
+                if typeTile == 'D':
+                    self.poi = [p for p in self.poi if p.tile != self.map[c]]
+
                 if (typeTile == 'K' or typeTile == 'D') and self.map[c].id == -1:
                     self.map[c].id = id
+                    self.map[c].locked = True
 
                     pair = False
                     for fID in self.foundIDs:
                         if fID.tile.id == id and typeTile == 'K':
                             self.prioritypoi.append(POI(self.map[c], self.currentDir, 1))
+                            self.map[c].locked = False
                             self.prioritypoi.append(fID)
+                            fID.tile.locked = False
                             self.foundIDs.remove(fID)
                             pair = True
                             break
 
                         elif fID.tile.id == id and typeTile == 'D':
                             self.prioritypoi.append(fID)
+                            fID.tile.locked = False
                             self.prioritypoi.append(POI(self.map[c], self.currentDir, 1))
+                            self.map[c].locked = False
                             self.foundIDs.remove(fID)
                             pair = True
                             break
@@ -860,44 +771,24 @@ def start():
     lab.mapRemain -= 1
 
     iN.setTile(lab)
+    lab.poi.pop()
     iN.explored = True
     return lab
 
-# correct = 0
-
-# for i in range(60):
-#     imgs = f"img_{i}"
-#     labHomo = start()
-#     labGT = start()
-
-#     labGT.generateGT(imgs)
-#     gt = labGT.printLab()
-
-#     labHomo.updateFromImage(imgs)
-#     labHomo.currentDir = 'r'
-#     homo = labHomo.printLab()
-
-#     if(gt == homo):
-#         correct += 1
-#     else:
-#         print(f"Image {i}: ")
-#         print(find_wall_errors(labGT, labHomo))
-     
-
-# print(f"Total accuracy: {correct/60}")
-
 #Called whenever we get an image to analyze (aka b/w homography + reduced image for yolo)
 def analyze(lab, imgName):
+    print(f"Recieved input: ")
     mostRestrictiveDoor, elements = lab.identifyElements(imgName)
     lab.updateFromImage(imgName, mostRestrictiveDoor)
     lab.correct(mostRestrictiveDoor, elements)
     destinationType, finalCommands = lab.selectNextPOI()
-    # print(lab.printLab())
 
-    #We send destinationType and finalCommands this to the robot here
+    if(destinationType == 'K' or destinationType == '?'):
+        print(f"He ido a la {destinationType} de {lab.currentPos}")
+        analyze(lab, "wall")
+    elif(destinationType == 'D'):
+        print(f"He ido a la {destinationType} de {lab.currentPos}")
+        lab.currentNode.setTile(lab)
+        analyze(lab, "img_7")
 
-lab = start()
-analyze(lab, "img_5")
-
-print(lab.printLab())
-print(lab.toJSON())
+    return destinationType, finalCommands
