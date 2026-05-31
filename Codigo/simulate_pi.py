@@ -5,6 +5,10 @@ import time
 # Change this to your VM's public IP when deploying 
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 
+#Path to resources folder
+resources = f"{Path(__file__).parent}/testOutput"
+
+# We need a designed folder to store the latest image sent for processing
 def send_robot_step(img_base_name, image_folder="."):
     """
     Simulates the Raspberry Pi taking two pictures and sending them to the server,
@@ -13,9 +17,9 @@ def send_robot_step(img_base_name, image_folder="."):
     print(f"Enviando datos al servidor para el paso: {img_base_name}...")
     
     # 1. Automatically construct the expected file paths
-    path_cenital = f"{Path(__file__).parent}/testOutput/{img_base_name}_cenitalBW.jpg"
+    path_cenital = f"{resources}/{img_base_name}_cenitalBW.jpg"
     
-    path_resized = f"{Path(__file__).parent}/testOutput/{img_base_name}_resized.jpg"
+    path_resized = f"{resources}/{img_base_name}_resized.jpg"
     
     try:
         # 2. Open the image files using the generated paths
@@ -69,27 +73,33 @@ def send_reset_command():
     except requests.exceptions.ConnectionError:
         print("❌ Error: No se pudo conectar al servidor. ¿Está encendido FastAPI?")
 
-if __name__ == "__main__":
-    send_reset_command()
-    time.sleep(1)
-    send_robot_step("img_28")
-    time.sleep(1)
-    send_robot_step("img_3")
-    time.sleep(1)
-    send_robot_step("wall")
-    time.sleep(1)
-    send_robot_step("wall")
-    time.sleep(1)
-    send_robot_step("img_23")
-    time.sleep(1)
-    send_robot_step("img_31")
-    time.sleep(1)
-    send_robot_step("wall")
-    time.sleep(1)
-    send_robot_step("img_53")
-    time.sleep(1)
-    send_robot_step("wall")
-    time.sleep(1)
-    send_robot_step("img_34")
+
+
+
+
+
+#Area for testing:
+# if __name__ == "__main__":
+#     send_reset_command()
+#     time.sleep(1)
+#     send_robot_step("img_28")
+#     time.sleep(1)
+#     send_robot_step("img_3")
+#     time.sleep(1)
+#     send_robot_step("wall")
+#     time.sleep(1)
+#     send_robot_step("wall")
+#     time.sleep(1)
+#     send_robot_step("img_23")
+#     time.sleep(1)
+#     send_robot_step("img_31")
+#     time.sleep(1)
+#     send_robot_step("wall")
+#     time.sleep(1)
+#     send_robot_step("img_53")
+#     time.sleep(1)
+#     send_robot_step("wall")
+#     time.sleep(1)
+#     send_robot_step("img_34")
 
 
