@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>AWSD - Historial</title>
+    <link rel="stylesheet" href="/static/css/historial.css">
+    <script type="module" src="/static/js/historial.js"></script>
+</head>
+<body>
+
+    <main class="layout-control-style">
+        <header class="panel header-titulo">
+            <h2>HISTORIAL DE MAPAS</h2>
+        </header>
+
+        <div class="cuerpo-interfaz">
+            <aside class="panel col-mapas-nueva">
+                <div class="titulo-seccion">Mapas Disponibles</div>
+                <div class="lista-mapas" id="lista"></div>
+            </aside>
+            
+            <section class="panel visor-mapa" id="visor">
+                <div class="contenido-visor">Selecciona un mapa para inspeccionar los datos</div>
+            </section>
+        </div>
+
+        <footer class="panel footer-controles">
+            <a href="/" class="btn-volver">Volver a la página anterior</a>
+        </footer>
+    </main>
+
+    <div id="capaFondoEliminar" class="popup-fondo" style="display: none;">
+        <div class="popup-contenido">
+            <h3>¿ELIMINAR MAPA?</h3>
+            <p>¿Estás seguro de que deseas borrar permanentemente este mapa?</p>
+            
+            <input type="hidden" id="archivoAEliminar">
+
+            <div class="popup-botones">
+                <button class="btn-cancelar" onclick="cerrarPopUpEliminar()">Cancelar</button>
+                <button class="btn-confirmar-borrado" onclick="confirmarEliminarDatos()">Eliminar</button>
+            </div>
+        </div>
+    </div>
+
+</body>
+</html>

@@ -1,0 +1,372 @@
+/* Reseteo básico y tipografía (Mantenido) */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+}
+
+body {
+    background-color: #0f172a; 
+    /* Añadimos un patrón de cuadrícula sutil en el fondo para llenar el vacío */
+    background-image: 
+        linear-gradient(135deg, #0f172a 0%, #1e1b4b 50%, #020617 100%);
+    
+    background-position: center;
+    color: #f8fafc;
+    min-height: 100vh;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    padding: 40px; /* Más espacio alrededor en pantallas grandes */
+}
+
+/* NUEVA ESTRUCTURA: Diseño en dos columnas sin Scroll */
+.main-container {
+    background: #1e293b; 
+    padding: 45px;
+    border-radius: 20px;
+    /* Un brillo exterior sutil (glow) para conectar la tarjeta con el fondo */
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 40px rgba(56, 189, 248, 0.05);
+    border: 1px solid rgba(51, 65, 85, 0.5);
+    
+    display: flex;
+    flex-direction: row;
+    gap: 50px; /* Más separación interna entre columnas */
+    max-width: 1150px; /* <--- EXPANDIDO (Antes 900px) */
+    width: 100%;
+}
+
+.info-section {
+    flex: 1.3; /* Le damos un poco más de peso a la info */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    text-align: left;
+}
+
+.info-section h1 {
+    font-size: 2.8rem;
+    color: #38bdf8; 
+    letter-spacing: 3px;
+    font-weight: 800;
+    line-height: 1;
+}
+
+.subtitle {
+    font-size: 0.95rem;
+    color: #38bdf8;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    opacity: 0.8;
+    margin-top: 5px;
+    margin-bottom: 20px;
+}
+
+.project-description {
+    color: #94a3b8;
+    font-size: 0.95rem;
+    line-height: 1.6;
+    margin-bottom: 20px;
+}
+
+.project-description strong {
+    color: #f8fafc;
+}
+
+.game-gallery {
+    display: flex;
+    gap: 12px; /* Espacio entre las fotos */
+    width: 100%;
+    margin-top: 15px;
+}
+
+.gallery-item {
+    flex: 1;
+    height: 140px; /* <--- EXPANDIDO (Antes 110px) para que se vean mejor tus fotos */
+    background: #0f172a;
+    border: 2px solid #334155;
+    border-radius: 10px;
+    overflow: hidden;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease;
+}
+
+.gallery-item:hover {
+    transform: translateY(-4px); /* Efecto de elevación más moderno */
+    border-color: #38bdf8;
+    box-shadow: 0 8px 20px rgba(56, 189, 248, 0.2);
+}
+
+.gallery-item img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Evita que la foto se deforme */
+    display: block;
+}
+
+/* Texto flotante discreto sobre cada foto */
+.gallery-item span {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    background: rgba(15, 23, 42, 0.8); /* Fondo oscuro semitransparente */
+    color: #38bdf8;
+    font-size: 0.75rem;
+    font-weight: 600;
+    text-align: center;
+    padding: 4px 0;
+    border-top: 1px solid rgba(51, 65, 85, 0.5);
+}
+
+/* Columna Derecha (Menú) */
+.action-section {
+    flex: 0.8;
+    background: #0f172a;
+    padding: 30px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    display: flex;
+    align-items: center;
+}
+
+.nav-menu {
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    gap: 15px;
+}
+
+.nav-menu h2 {
+    font-size: 1.3rem;
+    color: #f8fafc;
+    margin-bottom: 2px;
+}
+
+.nav-menu p {
+    font-size: 0.85rem;
+    color: #64748b;
+    margin-bottom: 10px;
+}
+
+/* Nuevos botones tipo menú */
+.btn-menu {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    background-color: #3b82f6;
+    color: white;
+    text-decoration: none;
+    padding: 16px;
+    border-radius: 8px;
+    font-size: 1.05rem;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+}
+
+.btn-menu:hover {
+    background-color: #2563eb;
+    transform: translateY(-2px);
+}
+
+.btn-secondary {
+    background-color: #475569;
+}
+
+.btn-secondary:hover {
+    background-color: #334155;
+}
+
+.btn-icon {
+    font-size: 1.2rem;
+}
+
+/* Responsivo rápido: si la pantalla es muy pequeña se adapta hacia abajo */
+@media (max-width: 768px) {
+    .main-container {
+        flex-direction: column;
+        padding: 20px;
+    }
+    .info-section { text-align: center; }
+}
+
+/* Contenedor que junta el Logo y los Títulos */
+.header-logo-container {
+    display: flex;
+    align-items: center;
+    gap: 20px; /* Espacio entre el logo y el texto */
+    margin-bottom: 15px;
+}
+
+/* Estilo del cuadro del Logo */
+.project-logo {
+    width: 75px;  /* Tamaño ideal para que destaque sin ocupar demasiada pantalla */
+    height: 75px;
+    background: #0f172a; /* Fondo oscuro a juego con la web */
+    border: 2px solid #334155; /* Borde sutil */
+    border-radius: 12px; /* Esquinas redondeadas estilo gaming */
+    overflow: hidden;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.3);
+}
+
+.project-logo img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover; /* Asegura que el logo se adapte bien al recuadro */
+}
+
+.header-text {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Ajuste responsivo por si se abre desde un móvil */
+@media (max-width: 768px) {
+    .header-logo-container {
+        flex-direction: column;
+        text-align: center;
+        gap: 10px;
+    }
+    .project-logo {
+        margin: 0 auto;
+    }
+}
+
+/* ==========================================
+   CONSERVADO: Estilos por si tus otras vistas 
+   usan la cruceta o el canvas antiguo
+   ========================================== */
+.canvas-container { background: #0f172a; padding: 6px; border-radius: 12px; display: inline-block; margin-bottom: 25px; box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.5); }
+#juego { display: block; background-color: #111827; border-radius: 8px; border: 2px solid #334155; max-width: 100%; height: auto; }
+.controls { display: grid; grid-template-areas: ". up ." "left down right"; gap: 10px; width: 180px; margin: 0 auto; }
+.btn { background-color: #3b82f6; color: white; border: none; padding: 14px; border-radius: 8px; font-size: 1.2rem; font-weight: bold; cursor: pointer; transition: background-color 0.2s ease, transform 0.1s ease; box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2); }
+.btn-up { grid-area: up; } .btn-left { grid-area: left; } .btn-down { grid-area: down; } .btn-right { grid-area: right; }
+.btn:hover { background-color: #2563eb; } .btn:active { transform: scale(0.92); box-shadow: 0 2px 4px rgba(0, 0, 0, 0.2); }
+.btn-back { display: inline-block; margin-top: 25px; color: #38bdf8; text-decoration: none; font-weight: 600; font-size: 0.95rem; transition: color 0.2s; }
+.btn-back:hover { color: #7dd3fc; text-decoration: underline; }
+
+
+/* ==========================================
+   VISTA DE CRÉDITOS
+   ========================================== */
+
+/* Contenedor principal de créditos */
+.credits-container {
+    background: #1e293b; /* Pizarra oscuro a juego con el index */
+    padding: 40px;
+    border-radius: 20px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.5), 0 0 40px rgba(56, 189, 248, 0.05);
+    border: 1px solid rgba(51, 65, 85, 0.5);
+    text-align: center;
+    max-width: 600px; /* Tarjeta más estrecha y elegante */
+    width: 100%;
+}
+
+.credits-header h2 {
+    font-size: 2.2rem;
+    color: #38bdf8; /* Azul brillante */
+    font-weight: 800;
+    letter-spacing: 1px;
+}
+
+/* Bloques de contenido */
+.credits-content {
+    margin: 30px 0;
+    display: flex;
+    flex-direction: column;
+    gap: 25px;
+}
+
+.credits-section {
+    background: #0f172a; /* Fondo más oscuro para hacer contraste interno */
+    padding: 20px;
+    border-radius: 12px;
+    border: 1px solid #334155;
+    text-align: left;
+}
+
+.credits-section h3 {
+    color: #f8fafc;
+    font-size: 1.15rem;
+    margin-bottom: 12px;
+    border-bottom: 1px solid #334155;
+    padding-bottom: 6px;
+}
+
+/* Listas de créditos */
+.credits-list {
+    list-style: none; /* Quitamos los puntitos por defecto */
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    font-size: 0.95rem;
+    color: #cbd5e1; /* Gris claro */
+}
+
+.credits-list strong {
+    color: #38bdf8; /* Resalta los nombres/tecnologías en azul */
+}
+
+.text-muted strong {
+    color: #a7f3d0; /* Un tono verde menta suave opcional para las tecnologías */
+}
+
+/* Botón Volver Atrás con estilo de menú */
+.btn-back-menu {
+    display: inline-block;
+    background-color: #475569; /* Gris pizarra */
+    color: white;
+    text-decoration: none;
+    padding: 12px 24px;
+    border-radius: 8px;
+    font-size: 0.95rem;
+    font-weight: bold;
+    transition: all 0.2s ease;
+    box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+    margin-top: 10px;
+}
+
+.btn-back-menu:hover {
+    background-color: #334155;
+    transform: translateY(-2px);
+}
+
+.btn-back-menu:active {
+    transform: translateY(0);
+}
+
+.project-description a, .credits-section a, h3 a {
+    color: inherit;            /* Hereda el color del texto padre (blanco o gris) */
+    text-decoration: none;     /* Quita el subrayado feo por defecto */
+    font-weight: 600;          /* Lo hace un poquito más grueso para dar una pista */
+    border-bottom: 1px dashed rgba(56, 189, 248, 0.4); /* Línea discontinua sutil azul */
+    transition: color 0.2s ease, border-color 0.2s ease;
+}
+
+/* Cuando el usuario pasa el ratón por encima (Hover) */
+.project-description a:hover, .credits-section a:hover, h3 a:hover {
+    color: #38bdf8;            /* Se ilumina con tu azul neón */
+    border-bottom-color: #38bdf8; /* La línea de abajo también se ilumina */
+    cursor: pointer;           /* Asegura que salga la mano de clicar */
+}
+/* Estilo para la sub-lista de Google Cloud */
+.credits-sub-list {
+    list-style: none; /* Quitamos los puntos por defecto del navegador */
+    padding-left: 20px; /* Sangría hacia la derecha */
+    margin-top: 6px; /* Espacio superior respecto al título "Google Cloud" */
+    display: flex;
+    flex-direction: column;
+    gap: 4px; /* Espacio entre cada servicio */
+}
+
+.credits-sub-list li {
+    font-size: 0.9rem; /* Un pelín más pequeño para dar jerarquía */
+    color: #94a3b8; /* Gris sutil */
+}
