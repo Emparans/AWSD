@@ -1,7 +1,5 @@
 import requests
 from pathlib import Path
-from picamera2 import Picamera2
-from gpiozero import OutputDevice, PWMOutputDevice
 import cv2
 import numpy as np
 import time
@@ -10,11 +8,11 @@ import threading
 import websocket
 import base64
 
+MODO_SIMULACION = True
+
 # URL pública de tu FastAPI en la VM
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
-
-picam2 = Picamera2()
 
 imageForProcessingName = "proc"
 outputCameraRes = (820, 616)
@@ -26,6 +24,16 @@ tempPos = (0, 0)
 
 # CAMBIO NUEVO: Evento de sincronización para esperar a la cámara
 camara_activa = threading.Event()
+
+if not MODO_SIMULACION:
+    from picamera2 import Picamera2
+    from gpiozero import OutputDevice, PWMOutputDevice, Device
+    from gpiozero.pins.pigpio import PiGPIOFactory
+    
+    Device.pin_factory = PiGPIOFactory()
+    picam2 = Picamera2()
+else:
+    picam2 = None # Placeholder para que no dé error en PC
 
 def stream_video_pi():
     while True:
@@ -40,9 +48,11 @@ def stream_video_pi():
                     ws.close()
                     break
                 
-                frame_yuv = picam2.capture_array("lores")
-                
-                frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
+                if MODO_SIMULACION:
+                    frame = np.zeros((616, 820, 3), dtype=np.uint8) # Pantalla negra
+                else:
+                    frame_yuv = picam2.capture_array("lores")
+                    frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
                 
                 if not camara_activa.is_set():
                     camara_activa.set()
@@ -147,32 +157,34 @@ def generate_mapping_sources(img):
 
 # --- Movimiento Físico y Sincronización Directa ---
 def detener_motores():
-    mA_pwm.value = 0.0
-    mA_in1.off()
-    mA_in2.off()
-    mB_pwm.value = 0.0
-    mB_in1.off()
-    mB_in2.off()
+    if not MODO_SIMULACION:
+        mA_pwm.value = 0.0
+        mA_in1.off()
+        mA_in2.off()
+        mB_pwm.value = 0.0
+        mB_in1.off()
+        mB_in2.off()
 
-def hardware_avanzar(tiempo):
-    mA_in1.off(); mA_in2.on(); mA_pwm.value = POTENCIA_MOTORES / 2
-    mB_in1.off(); mB_in2.on(); mB_pwm.value = POTENCIA_MOTORES / 2
-    time.sleep(tiempo)
-    detener_motores()
+def hardware_avanzar():
+    if not MODO_SIMULACION:
+        mA_in1.on(); mA_in2.off(); mA_pwm.value = POTENCIA_MOTORES_AVANCE
+        mB_in1.on(); mB_in2.off(); mB_pwm.value = POTENCIA_MOTORES_AVANCE
 
 def hardware_girar_izquierda(tiempo):
-    # Motor A va hacia atrás, Motor B hacia adelante (Giro sobre su propio eje)
-    mA_in1.off(); mA_in2.on(); mA_pwm.value = POTENCIA_MOTORES
-    mB_in1.on(); mB_in2.off(); mB_pwm.value = POTENCIA_MOTORES
-    time.sleep(tiempo)
-    detener_motores()
+    if not MODO_SIMULACION:
+        # Motor A va hacia atrás, Motor B hacia adelante (Giro sobre su propio eje)
+        mA_in1.off(); mA_in2.on(); mA_pwm.value = POTENCIA_MOTORES_GIRO
+        mB_in1.on(); mB_in2.off(); mB_pwm.value = POTENCIA_MOTORES_GIRO
+        time.sleep(tiempo)
+        detener_motores()
 
 def hardware_girar_derecha(tiempo):
-    # Motor A va hacia adelante, Motor B hacia atrás
-    mA_in1.on(); mA_in2.off(); mA_pwm.value = POTENCIA_MOTORES
-    mB_in1.off(); mB_in2.on(); mB_pwm.value = POTENCIA_MOTORES
-    time.sleep(tiempo)
-    detener_motores()
+    if not MODO_SIMULACION:
+        # Motor A va hacia adelante, Motor B hacia atrás
+        mA_in1.on(); mA_in2.off(); mA_pwm.value = POTENCIA_MOTORES_GIRO
+        mB_in1.off(); mB_in2.on(); mB_pwm.value = POTENCIA_MOTORES_GIRO
+        time.sleep(tiempo)
+        detener_motores()
 
 def moveForward(nTiles):
     global tempPos
@@ -180,12 +192,15 @@ def moveForward(nTiles):
     
     additions = {'u': (0, 1), 'r': (1, 0), 'd': (0, -1), 'l': (-1, 0)}
     addition = additions.get(tempDir, (0, 0))
+    hardware_avanzar()
 
     for _ in range(nTiles):
         tempPos = (tempPos[0] + addition[0], tempPos[1] + addition[1])
         sync_position_with_server()
-        hardware_avanzar(TIEMPO_AVANCE_CASILLA)
-        time.sleep(0.5)
+        time.sleep(TIEMPO_AVANCE_CASILLA)
+        
+    detener_motores()
+    time.sleep(0.5)
 
 def turnLeft():
     global tempDir
@@ -202,6 +217,15 @@ def turnRight():
     sync_position_with_server()
     hardware_girar_derecha(TIEMPO_GIRO)
     time.sleep(0.5)
+
+def turnBack():
+    global tempDir
+    trans = {'u': 'd', 'r': 'l', 'd': 'u', 'l': 'r'}
+    tempDir = trans.get(tempDir, tempDir)
+    sync_position_with_server()
+    hardware_girar_derecha(TIEMPO_GIRO * 2)
+    time.sleep(0.5)
+
 def sync_position_with_server():
     try:
         requests.post(f"{SERVER_URL}/update_position", json={"pos": list(tempPos), "dir": tempDir}, timeout=2)
@@ -254,7 +278,7 @@ def executeCommands(commands):
         action, steps = cmd[0], int(cmd[1])
         if action == 'r': turnRight()
         elif action == 'l': turnLeft()
-        elif action == 'b': turnRight(); turnRight()
+        elif action == 'b': turnBack()
         moveForward(steps)
 
 # --- Bucle de ejecución principal ---
@@ -262,13 +286,27 @@ def robot_loop():
     estado_actual = "ESCANEO" 
     dest_type, commands = None, []
     image_idx = 0
+    qr_idx = 0
     
     while True:
         if estado_actual == "ESCANEO":
-            iname = imgNames[image_idx] if image_idx < len(imgNames) else "wall"
-            img_path = f"{real}/{iname}.jpg"
+            if MODO_SIMULACION:
+                print("📸 Tomando foto simulada de la carpeta...")
+                iname = imgNames[image_idx] if image_idx < len(imgNames) else "wall"
+                img_path = f"{real}/{iname}.jpg"
+                frame_bgr = cv2.imread(img_path)
+            else:
+                print("📸 Tomando foto simulada de la carpeta...")
+                iname = imgNames[image_idx] if image_idx < len(imgNames) else "wall"
+                img_path = f"{real}/{iname}.jpg"
+                frame_bgr = cv2.imread(img_path)
+
+                # Para luego
+                # print("📸 Tomando foto 4K para YOLO y Homografía...")
+                # frame_rgb = picam2.capture_array("main")
+                # frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
             
-            homography, resized = generate_mapping_sources(cv2.imread(img_path))
+            homography, resized = generate_mapping_sources(frame_bgr)
             if homography is None:
                 time.sleep(1); continue
                 
@@ -294,13 +332,64 @@ def robot_loop():
             if dest_type == 'X' and not commands:
                 print("🏁 Laberinto completado o sin salidas."); break
                 
-            elif dest_type in ['D', 'K', '?']:
+            elif dest_type in ['D', 'K']:
                 print(f"Acción en casilla: Interactuando con {dest_type}...")
                 try:
                     requests.post(f"{SERVER_URL}/interactuar", json={"tipo": dest_type})
                 except requests.exceptions.RequestException: pass
                 time.sleep(2)
                 estado_actual = "SALTO_ESCANEO" if dest_type in ['K', '?'] else "ESCANEO"
+
+            elif dest_type == '?':
+                print("❓ Inspeccionando interrogante (QR)...")
+                if MODO_SIMULACION:
+                    img_path = f"{real}/{imgQRs[qr_idx] if qr_idx < len(imgQRs) else imgQRs[0]}.jpg"
+                    frame = cv2.imread(img_path)
+                else:
+                    img_path = f"{real}/{imgQRs[qr_idx] if qr_idx < len(imgQRs) else imgQRs[0]}.jpg"
+                    frame = cv2.imread(img_path)
+                
+                    # (Cuando uses la cámara física más adelante, sustituyes lo de arriba por esto:)
+                    # frame_rgb = picam2.capture_array("main")
+                    # frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+
+                frame_pequeno = cv2.resize(frame, (820, 616))
+                success, buffer = cv2.imencode('.jpg', frame_pequeno, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+
+                if success:
+                    files = {"file": ("qr.jpg", buffer.tobytes(), "image/jpeg")}
+                    try:
+                        # Mandamos la imagen a la API de control
+                        res = requests.post("http://34.0.201.131:8080/control/leer-qr", files=files)
+                        if res.status_code == 200:
+                            print("✅ QR enviado. Esperando a que el usuario responda por voz...")
+                    except Exception as e:
+                        print("❌ Error enviando QR:", e)
+                
+                # 2. BUCLE DE ESPERA (POLLING)
+                interaccion_terminada = False
+                while not interaccion_terminada:
+                    try:
+                        # Preguntamos al servidor si el pipeline ya terminó
+                        estado_res = requests.get("http://34.0.201.131:8080/control/estado-interaccion", timeout=2)
+                        if estado_res.status_code == 200:
+                            interaccion_terminada = estado_res.json().get("completada", False)
+                    except:
+                        pass
+                    
+                    if not interaccion_terminada:
+                        # Si no ha terminado, el robot sigue parado sin hacer nada
+                        time.sleep(2) 
+                
+                print("🎙️ Respuesta procesada por Gemini. ¡El robot continúa!")
+                
+                try:
+                    requests.post(f"{SERVER_URL}/interactuar", json={"tipo": "?"})
+                except requests.exceptions.RequestException: pass
+                
+                qr_idx += 1
+
+                estado_actual = "SALTO_ESCANEO"
                 
             elif dest_type == 'X':
                 estado_actual = "ESCANEO"
@@ -308,35 +397,40 @@ def robot_loop():
         time.sleep(0.1)
 
 imgNames = ["img_28", "img_3", "wall", "wall", "wall", "wall", "img_23", "img_7", "img_29", "wall", "wall", "img_53", "wall", "img_34"]
+imgQRs = ["img_X", "img_Y", "img_Z"]
     
 if __name__ == "__main__":
     try:
-        print("[+] Inicializando pines para los Motores A y B...")
-        mA_in1 = OutputDevice(19, initial_value=False)
-        mA_in2 = OutputDevice(6, initial_value=False)
-        mA_pwm = PWMOutputDevice(13, initial_value=0.0)
-
-        mB_in1 = OutputDevice(16, initial_value=False)
-        mB_in2 = OutputDevice(20, initial_value=False)
-        mB_pwm = PWMOutputDevice(12, initial_value=0.0)
-
         # ⚙️ TIEMPOS DE CALIBRACIÓN (Cámbialos según lo que tarde físicamente tu robot)
-        TIEMPO_AVANCE_CASILLA = 0.8 # Segundos que tarda en avanzar 1 casilla entera
-        TIEMPO_GIRO = 0.8           # Segundos que tarda en rotar 90 grados
-        POTENCIA_MOTORES = 0.5      # 1.0 = 100%, 0.5 = 50%
-        
-        print("[+] Configurando Doble Flujo de vídeo en hardware...")
-        
-        config = picam2.create_preview_configuration(
-            main={"size": (3280, 2464), "format": "RGB888"},
-            lores={"size": (820, 616), "format": "YUV420"}
-        )
-        config["sensor_mode"] = 0
-        picam2.configure(config)
-        picam2.start()
-        
-        print("[+] Calibrando sensor...")
-        time.sleep(2.0)
+        TIEMPO_AVANCE_CASILLA = 1.0 # Segundos que tarda en avanzar 1 casilla entera
+        TIEMPO_GIRO = 1.0           # Segundos que tarda en rotar 90 grados
+        POTENCIA_MOTORES_AVANCE = 0.3
+        POTENCIA_MOTORES_GIRO = 0.3
+
+        if MODO_SIMULACION:
+            print("[💻] INICIANDO EN MODO SIMULACIÓN (PC)...")
+        else:
+            print("[🤖] INICIANDO EN MODO FÍSICO (RASPBERRY PI)...")
+            print("[+] Inicializando pines para los Motores A y B...")
+            mA_in1 = OutputDevice(20, initial_value=False)
+            mA_in2 = OutputDevice(16, initial_value=False)
+            mA_pwm = PWMOutputDevice(12, initial_value=0.0)
+
+            mB_in1 = OutputDevice(6, initial_value=False)
+            mB_in2 = OutputDevice(19, initial_value=False)
+            mB_pwm = PWMOutputDevice(13, initial_value=0.0)
+            
+            print("[+] Configurando Doble Flujo de vídeo en hardware...")
+            config = picam2.create_preview_configuration(
+                main={"size": (3280, 2464), "format": "RGB888"},
+                lores={"size": (820, 616), "format": "YUV420"}
+            )
+            config["sensor_mode"] = 0
+            picam2.configure(config)
+            picam2.start()
+            
+            print("[+] Calibrando sensor...")
+            time.sleep(2.0)
 
         print("[+] Inicializando secuencia del robot físico en la Raspberry Pi.")
         
@@ -348,9 +442,7 @@ if __name__ == "__main__":
         print("[+] Cámara lista y transmitiendo. Iniciando robot.")
         
         send_reset_command()
-        #robot_loop()
-
-        moveForward(1)
+        robot_loop()
 
     except KeyboardInterrupt:
         print("\n[!] Simulación detenida manualmente.")
@@ -358,6 +450,8 @@ if __name__ == "__main__":
     finally:
         print("\n[*] Apagando motores de forma segura y liberando pines...")
         detener_motores()
-        mA_in1.close(); mA_in2.close(); mA_pwm.close()
-        mB_in1.close(); mB_in2.close(); mB_pwm.close()
+        if not MODO_SIMULACION:
+            mA_in1.close(); mA_in2.close(); mA_pwm.close()
+            mB_in1.close(); mB_in2.close(); mB_pwm.close()
+            picam2.stop()
         print("[+] Hardware liberado. Fin del programa.")
