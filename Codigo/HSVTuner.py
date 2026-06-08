@@ -7,8 +7,8 @@ def nothing(x):
 
 # Load your REAL image here
 
-imgName = "img_2"
-input_path = f"{Path(__file__).parent}/testOutput/{imgName}_resized.jpg"
+imgName = "img_1_resized"
+input_path = f"{Path(__file__).parent}/testOutput/{imgName}.jpg"
 
 img = cv2.imread(input_path)
 if img is None:
