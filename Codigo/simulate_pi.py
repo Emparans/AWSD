@@ -9,7 +9,7 @@ import websocket
 import base64
 import os
 
-MODO_SIMULACION = True
+MODO_SIMULACION = False
 
 # URL pública de tu FastAPI en la VM
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
@@ -169,8 +169,8 @@ def orientate():
 
     print(f"\n🧭 Iniciando alineación inteligente con pared: {ref}")
     power = 0.15
-    spinTime = 0.1
-    timeBetweenSteps = 0.25
+    spinTime = 0.15
+    timeBetweenSteps = 0.2
 
     pasos_totales = 16
     datos_barrido = []
@@ -180,17 +180,19 @@ def orientate():
             hardware_girar_izquierda(spinTime, power)
             time.sleep(timeBetweenSteps)
 
-        for _ in range(int(pasos_totales*(3/4))):
+        pasos_barrido = int(pasos_totales*(3/4))
+        for _ in range(pasos_barrido):
             dist = leer_distancia_robusta(ref)
             datos_barrido.append(dist)
             
             # Giramos un paso a la derecha
             hardware_girar_derecha(spinTime, power)
 
+        time.sleep(timeBetweenSteps)
         datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
         idx_min = np.argmin(datos_suavizados)
 
-        pasos_a_volver = pasos_totales - idx_min
+        pasos_a_volver = pasos_barrido - idx_min + 1
 
         for _ in range(pasos_a_volver):
             hardware_girar_izquierda(spinTime, power)
@@ -201,17 +203,19 @@ def orientate():
             hardware_girar_derecha(spinTime, power)
             time.sleep(timeBetweenSteps)
 
-        for _ in range(int(pasos_totales*(3/4))):
+        pasos_barrido = int(pasos_totales*(3/4))
+        for _ in range(pasos_barrido):
             dist = leer_distancia_robusta(ref)
             datos_barrido.append(dist)
             
             # Giramos un paso a la derecha
             hardware_girar_izquierda(spinTime, power)
 
+        time.sleep(timeBetweenSteps)
         datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
         idx_min = np.argmin(datos_suavizados)
 
-        pasos_a_volver = pasos_totales - idx_min
+        pasos_a_volver = pasos_barrido - idx_min + 1
 
         for _ in range(pasos_a_volver):
             hardware_girar_derecha(spinTime, power)
@@ -222,17 +226,19 @@ def orientate():
             hardware_girar_izquierda(spinTime, power)
             time.sleep(timeBetweenSteps)
 
-        for _ in range(int(pasos_totales)):
+            pasos_barrido = pasos_totales
+        for _ in range(pasos_barrido):
             dist = leer_distancia_robusta(ref)
             datos_barrido.append(dist)
             
             # Giramos un paso a la derecha
             hardware_girar_derecha(spinTime, power)
 
+        time.sleep(timeBetweenSteps)
         datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
         idx_min = np.argmin(datos_suavizados)
 
-        pasos_a_volver = pasos_totales - idx_min
+        pasos_a_volver = pasos_barrido - idx_min + 1
 
         for _ in range(pasos_a_volver):
             hardware_girar_izquierda(spinTime, power)
@@ -282,9 +288,79 @@ def orientate():
 #         except Exception:
 #             time.sleep(0.2)
 
-def resize_frame(frame):
-    if frame is None: return None
-    return cv2.resize(frame, outputCameraRes)
+# def getRotationAngle():
+#     frame_yuv = picam2.capture_array("main")
+#     frame_bgr = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
+
+#     outputXSize = 800
+#     latRate = 1/4 
+#     nTilesInVArea = 4.5
+#     latMargin = outputXSize * latRate / 2
+
+#     h, w = frame_bgr.shape[:2]
+#     scale_x, scale_y = w / 2380, h / 2464
+
+#     pts_src = np.array([[322, 2463], [2956, 2463], [1886, 872], [1394, 872]], dtype=np.float32)
+#     pts_src[:, 0] *= scale_x  
+#     pts_src[:, 1] *= scale_y  
+
+#     pts_dst = np.array([
+#         [latMargin, outputCameraRes[1]], 
+#         [outputCameraRes[0] - latMargin, outputCameraRes[1]], 
+#         [outputCameraRes[0] - latMargin, 0], 
+#         [latMargin, 0]
+#     ], dtype=np.float32)
+    
+#     H = cv2.getPerspectiveTransform(pts_src, pts_dst)
+
+#     img_hsv = cv2.cvtColor(frame_bgr, cv2.COLOR_BGR2HSV)
+#     lower_brown = np.array([163, 60, 53])
+#     upper_brown = np.array([179, 101, 163])
+#     mask_orig = cv2.inRange(img_hsv, lower_brown, upper_brown)
+
+#     # 4. Vista de Pájaro (Solo deformamos la máscara blanca/negra, ¡es mucho más rápido!)
+#     mask_bird = cv2.warpPerspective(mask_orig, H, (outputCameraRes[0], outputCameraRes[1]), borderValue=0)
+
+#     # 5. Detección de Bordes (Analizamos solo el 50% inferior, lo que está justo frente al robot)
+#     bottom_half = int(outputCameraRes[1] * 0.5)
+#     edges = cv2.Canny(mask_bird[bottom_half:, :], 50, 150)
+#     lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=40, minLineLength=50, maxLineGap=15)
+
+#     if lines is None:
+#         return 0.0
+
+#     angles = []
+#     weights = []
+
+#     # 6. Cálculo del Ángulo Ponderado
+#     for line in lines:
+#         x1, y1, x2, y2 = line[0]
+#         # Aseguramos que el vector siempre apunte "hacia arriba" (y negativo en la imagen)
+#         if y2 > y1: 
+#             x1, y1, x2, y2 = x2, y2, x1, y1
+            
+#         dx, dy = x2 - x1, y1 - y2
+        
+#         if dx != 0 or dy != 0:
+#             tilt = 90.0 - np.degrees(np.arctan2(dy, dx))
+            
+#             # Ampliamos la tolerancia: si el robot está torcido hasta 35 grados, lo detectamos
+#             if -35 < tilt < 35:
+#                 # Teorema de Pitágoras para sacar la longitud de la línea (su peso)
+#                 length = np.sqrt(dx**2 + dy**2)
+#                 angles.append(tilt)
+#                 weights.append(length)
+
+#     if not angles:
+#         return 0.0
+
+#     # Matemáticas de campeonato: La pared más larga domina el ángulo final
+#     best_tilt = np.average(angles, weights=weights)
+
+#     print(best_tilt)
+
+#     return float(best_tilt)
+
 
 def generate_mapping_sources(img):
     """Genera la homografía en blanco y negro para el análisis del mapa."""
@@ -364,12 +440,19 @@ def generate_mapping_sources(img):
     mask_final = cv2.warpPerspective(mask_orig, H_final, (WIDTH, HEIGHT), borderValue=0)
     mask_final = cv2.morphologyEx(mask_final, cv2.MORPH_CLOSE, kernel)
     
-    return mask_final, cv2.resize(img, outputCameraRes)
+    return mask_final
 
 # --- Movimiento Físico y Sincronización Directa ---
 def sleep_preciso_hardware(segundos):
     if segundos <= 0: return
     objetivo = time.perf_counter() + segundos
+    
+    margen = 0.002
+    tiempo_restante = objetivo - time.perf_counter()
+    
+    if tiempo_restante > margen:
+        time.sleep(tiempo_restante - margen)
+        
     while time.perf_counter() < objetivo:
         pass
 
@@ -386,25 +469,41 @@ def hardware_avanzar():
     if not MODO_SIMULACION:
         mA_in1.on(); mA_in2.off(); mA_pwm.value = POTENCIA_MOTORES_AVANCE
         mB_in1.on(); mB_in2.off(); mB_pwm.value = POTENCIA_MOTORES_AVANCE
+        
+def hardware_girar_con_impulso(potencia):
+    if MODO_SIMULACION: return
+
+    impulso_potencia = 0.35 
+    
+    mA_pwm.value = impulso_potencia
+    mB_pwm.value = impulso_potencia
+    sleep_preciso_hardware(0.02)
+
+    mA_pwm.value = potencia
+    mB_pwm.value = potencia
 
 def hardware_girar_izquierda(tiempo, potencia = None):
     if not MODO_SIMULACION:
         if potencia == None:
             potencia = POTENCIA_MOTORES_GIRO
-        # Motor A va hacia atrás, Motor B hacia adelante (Giro sobre su propio eje)
-        mA_in1.off(); mA_in2.on(); mA_pwm.value = potencia
-        mB_in1.on(); mB_in2.off(); mB_pwm.value = potencia
-        sleep_preciso_hardware(tiempo * 1.1)
+            
+        mA_in1.off(); mA_in2.on()
+        mB_in1.on(); mB_in2.off()
+        hardware_girar_con_impulso(potencia)
+
+        sleep_preciso_hardware((tiempo - 0.03)*1.1)
         detener_motores()
 
 def hardware_girar_derecha(tiempo, potencia = None):
     if not MODO_SIMULACION:
         if potencia == None:
             potencia = POTENCIA_MOTORES_GIRO
-        # Motor A va hacia adelante, Motor B hacia atrás
-        mA_in1.on(); mA_in2.off(); mA_pwm.value = potencia
-        mB_in1.off(); mB_in2.on(); mB_pwm.value = potencia
-        sleep_preciso_hardware(tiempo)
+            
+        mA_in1.on(); mA_in2.off()
+        mB_in1.off(); mB_in2.on()
+        hardware_girar_con_impulso(potencia)
+        
+        sleep_preciso_hardware(tiempo - 0.03)
         detener_motores()
 
 def moveForward(nTiles):
@@ -558,16 +657,15 @@ def robot_loop():
                 img_path = f"{real}/{iname}_reduced.jpg"
                 frame_bgr = cv2.imread(img_path)
 
-                # Para luego
-                # print("📸 Tomando foto 4K para YOLO y Homografía...")
-                # frame_rgb = picam2.capture_array("main")
-                # frame_bgr = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                # print("📸 Tomando foto para YOLO y Homografía...")
+                # frame_yuv = picam2.capture_array("main")
+                # frame_bgr = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
             
-            homography, resized = generate_mapping_sources(frame_bgr)
+            homography = generate_mapping_sources(frame_bgr)
             if homography is None:
                 time.sleep(1); continue
                 
-            dest_type, commands = send_robot_step(homography, resized)
+            dest_type, commands = send_robot_step(homography, frame_bgr)
             if dest_type is None:
                 time.sleep(2); continue
                 
@@ -623,8 +721,8 @@ def robot_loop():
                     frame = cv2.imread(img_path)
                 
                     # (Cuando uses la cámara física más adelante, sustituyes lo de arriba por esto:)
-                    # frame_rgb = picam2.capture_array("main")
-                    # frame = cv2.cvtColor(frame_rgb, cv2.COLOR_RGB2BGR)
+                    # frame_yuv = picam2.capture_array("main")
+                    # frame_bgr = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
 
                 frame_pequeno = cv2.resize(frame, (820, 616))
                 success, buffer = cv2.imencode('.jpg', frame_pequeno, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
@@ -675,7 +773,7 @@ imgQRs = ["img_X", "img_Y", "img_Z"]
 if __name__ == "__main__":
     try:
         # ⚙️ TIEMPOS DE CALIBRACIÓN
-        TIEMPO_AVANCE_CASILLA = 0.5 # Segundos que tarda en avanzar 1 casilla entera
+        TIEMPO_AVANCE_CASILLA = 1.0 # Segundos que tarda en avanzar 1 casilla entera
         TIEMPO_GIRO = 1.0           # Segundos que tarda en rotar 90 grados
         POTENCIA_MOTORES_AVANCE = 0.3
         POTENCIA_MOTORES_GIRO = 0.3
@@ -705,11 +803,11 @@ if __name__ == "__main__":
             rele = OutputDevice(26, active_high=True, initial_value=False)
 
 
-            print("[+] Configurando Doble Flujo de vídeo en hardware...")
+            print("[+] Configurando flujo único de vídeo optimizado...")
             config = picam2.create_preview_configuration(
-                main={"size": (3280, 2464), "format": "RGB888"},
-                lores={"size": (820, 616), "format": "YUV420"}
+                main={"size": (820, 616), "format": "YUV420"}
             )
+            
             config["sensor_mode"] = 0
             picam2.configure(config)
             picam2.start()
@@ -726,14 +824,17 @@ if __name__ == "__main__":
 
             # print("[+] Inicializando secuencia del robot físico en la Raspberry Pi.")
         
-        send_reset_command()
-        robot_loop()
+        # send_reset_command()
+        # robot_loop()
 
-        # for _ in range(2):
-        #     turnLeft()
-        #     orientate()
-        #     turnRight()
-        #     orientate()
+        moveForward(1)
+        turnLeft()
+        orientate()
+        turnRight()
+        orientate()
+        turnBack()
+        orientate()
+        moveForward(1)
 
     except KeyboardInterrupt:
         print("\n[!] Simulación detenida manualmente.")
