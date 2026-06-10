@@ -9,28 +9,24 @@ import websocket
 import base64
 import os
 import random
-
-MODO_SIMULACION = True
+import sim
+import math
 
 # URL pública de tu FastAPI en la VM
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
 
+distancesByNTiles = { 1 : 46, 2 : 95}
+
 imageForProcessingName = "proc"
 outputCameraRes = (820, 616)
-real = Path(__file__).parent / "real"
 
 # Estado de telemetría física del Robot
 tempDir = 'r'
 tempPos = (0, 0)
 lastTurn = 'X'
 
-# CAMBIO NUEVO: Evento de sincronización para esperar a la cámara
-camara_activa = threading.Event()
-
-
 def esperarPasos(tiempo):
-    if not MODO_SIMULACION: return
     pasos = int(tiempo / 0.05)
     for _ in range(pasos):
         sim.simxSynchronousTrigger(clientID)
@@ -41,13 +37,6 @@ def aplicarVelocidades(vel_izq, vel_der):
 
 def frenar():
     aplicarVelocidades(0, 0)
-
-def moverCasilla(v_angular=1):
-    v_lineal = v_angular * 0.04
-    t = 0.25 / v_lineal
-    aplicarVelocidades(v_angular, v_angular)
-    esperarPasos(t)
-    frenar()
 
 def girar(v_angular, grados):
     radio_rueda = 0.04
@@ -72,7 +61,6 @@ def girar(v_angular, grados):
 
 def obtener_imagen_simulador():
     """Captura el frame actual del Vision_sensor de CoppeliaSim y lo adapta a OpenCV (BGR)."""
-    # sim.simxGetVisionSensorImage(clientID, handle, options (0=RGB), operationMode)
     retCode, resolution, image = sim.simxGetVisionSensorImage(clientID, camara, 0, sim.simx_opmode_blocking)
     print("A")
     img = np.array(image, dtype=np.float32)
@@ -100,267 +88,10 @@ def pillarLlave():
     avanzar(1, 1)
     avanzar(-1, 1)
 
-
-if not MODO_SIMULACION:
-    from picamera2 import Picamera2
-    from gpiozero import OutputDevice, PWMOutputDevice, Device, DistanceSensor
-    from gpiozero.pins.pigpio import PiGPIOFactory
-    
-    Device.pin_factory = PiGPIOFactory()
-    picam2 = Picamera2()
-else:
-    picam2 = None # Placeholder para que no dé error en PC
-    import sim
-    import math
-
-#Sensor related functions
-def leer_distancia_robusta(nombre_sensor, num_muestras=5):
-    if MODO_SIMULACION: return 15.0
-    
-    sensor = SENSORES[nombre_sensor]
-    muestras = []
-    
-    for _ in range(num_muestras):
-        dist = sensor.distance * 100
-        if dist > 0:
-            muestras.append(dist)
-        time.sleep(0.1) # Micro-pausa para tomar lecturas distintas
-    
-    return np.median(muestras) if muestras else -1.0
-
-def evaluar_sensor_aislado(nombre_sensor, num_muestras=5):
-    if MODO_SIMULACION: return 15.0, 0.1
-    
-    sensor = SENSORES[nombre_sensor]
-    muestras = []
-    
-    for _ in range(num_muestras):
-        dist = sensor.distance * 100
-        if dist > 0:
-            muestras.append(dist)
-        time.sleep(0.1)
-        
-    if len(muestras) < 3:
-        return 300.0, 999.0 
-        
-    return np.median(muestras), float(np.var(muestras))
-
-def buscar_mejor_pared():
-    resultados = {}
-    
-    for nombre in SENSORES.keys():
-        dist, varianza = evaluar_sensor_aislado(nombre)
-        score = dist + (varianza * 5.0)
-        
-        # Guardamos el score SOLO si la pared está lo suficientemente cerca
-        if dist < 40.0:
-            resultados[nombre] = score
-            print(f"   - {nombre: <10}: Dist {dist:04.1f}cm | Var {varianza:04.2f} -> Score: {score:05.1f}")
-            
-    if not resultados:
-        print("No trustworthy walls around")
-        return None
-        
-    ganador = min(resultados, key=resultados.get)
-    
-    print(f"Using {ganador} wall as reference (Score ganador: {resultados[ganador]:0.1f})")
-    return ganador
-
-# def orientate():
-#     ref = buscar_mejor_pared()
-
-#     if not ref:
-#         return
-
-#     print(f"\n🧭 Iniciando alineación inteligente con pared: {ref}")
-#     power = 0.15
-#     spinTime = 0.05
-#     max_intentos = 20
-#     timeBetweenSteps = 0.25
-    
-#     ruido_tolerancia = 0.3 
-
-#     dist_inicial = leer_distancia_robusta(ref)
-#     print(f"   Distancia inicial: {dist_inicial:0.1f} cm")
-
-#     hardware_girar_derecha(spinTime, power)
-#     sleep_preciso_hardware(timeBetweenSteps)
-#     dist_prueba = leer_distancia_robusta(ref)
-
-#     if dist_prueba < dist_inicial:
-#         print(f"   Prueba derecha ({dist_prueba:0.1f} cm): ¡Mejora! Seguimos a la derecha.")
-#         turningDir = 'r'
-#         mejor_dist = dist_prueba
-#         pasos_desde_mejor = 0
-#     else:
-#         print(f"   Prueba derecha ({dist_prueba:0.1f} cm): Empeora. Cambiando a izquierda.")
-#         turningDir = 'l'
-#         hardware_girar_izquierda(spinTime, power)
-#         sleep_preciso_hardware(timeBetweenSteps)
-#         mejor_dist = dist_inicial
-#         pasos_desde_mejor = 0
-
-#     intentos = 0
-#     while intentos < max_intentos:
-#         if turningDir == 'r':
-#             hardware_girar_derecha(spinTime, power)
-#         else:
-#             hardware_girar_izquierda(spinTime, power)
-
-#         sleep_preciso_hardware(timeBetweenSteps)
-#         dist_actual = leer_distancia_robusta(ref)
-#         print(f"   Paso {intentos + 1}: {dist_actual:0.1f} cm", end="")
-
-#         if dist_actual < mejor_dist:
-#             mejor_dist = dist_actual
-#             pasos_desde_mejor = 0 
-#             print(" (Récord actualizado)")
-#         else:
-#             pasos_desde_mejor += 1
-#             print(f" (+{pasos_desde_mejor} pasos desde el mínimo)")
-
-#         if dist_actual > (mejor_dist + ruido_tolerancia):
-#             print(f"✅ Mínimo superado. Retrocediendo {pasos_desde_mejor} paso(s) exacto(s).")
-            
-#             for _ in range(pasos_desde_mejor):
-#                 if turningDir == 'r':
-#                     hardware_girar_izquierda(spinTime, power)
-#                 else:
-#                     hardware_girar_derecha(spinTime, power)
-#                 sleep_preciso_hardware(timeBetweenSteps)
-#             break
-
-#         intentos += 1
-
-#     if intentos == max_intentos:
-#         print("⚠️ Orientación terminada por límite de intentos.")
-    
-#     print(f"🏁 Robot alineado. Distancia final aprox: {mejor_dist:0.1f} cm\n")
-
-def orientate():
-    ref = buscar_mejor_pared()
-
-    if not ref:
-        return
-
-    print(f"\n🧭 Iniciando alineación inteligente con pared: {ref}")
-    power = 0.15
-    spinTime = 0.1
-    timeBetweenSteps = 0.25
-
-    pasos_totales = 16
-    datos_barrido = []
-
-    if(lastTurn == 'l'):
-        for _ in range(int(pasos_totales/4)):
-            hardware_girar_izquierda(spinTime, power)
-            time.sleep(timeBetweenSteps)
-
-        for _ in range(int(pasos_totales*(3/4))):
-            dist = leer_distancia_robusta(ref)
-            datos_barrido.append(dist)
-            
-            # Giramos un paso a la derecha
-            hardware_girar_derecha(spinTime, power)
-
-        datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
-        idx_min = np.argmin(datos_suavizados)
-
-        pasos_a_volver = pasos_totales - idx_min
-
-        for _ in range(pasos_a_volver):
-            hardware_girar_izquierda(spinTime, power)
-            time.sleep(timeBetweenSteps)
-
-    elif(lastTurn == 'r'):
-        for _ in range(int(pasos_totales/4)):
-            hardware_girar_derecha(spinTime, power)
-            time.sleep(timeBetweenSteps)
-
-        for _ in range(int(pasos_totales*(3/4))):
-            dist = leer_distancia_robusta(ref)
-            datos_barrido.append(dist)
-            
-            # Giramos un paso a la derecha
-            hardware_girar_izquierda(spinTime, power)
-
-        datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
-        idx_min = np.argmin(datos_suavizados)
-
-        pasos_a_volver = pasos_totales - idx_min
-
-        for _ in range(pasos_a_volver):
-            hardware_girar_derecha(spinTime, power)
-            time.sleep(timeBetweenSteps)
-    
-    else:
-        for _ in range(int(pasos_totales/2)):
-            hardware_girar_izquierda(spinTime, power)
-            time.sleep(timeBetweenSteps)
-
-        for _ in range(int(pasos_totales)):
-            dist = leer_distancia_robusta(ref)
-            datos_barrido.append(dist)
-            
-            # Giramos un paso a la derecha
-            hardware_girar_derecha(spinTime, power)
-
-        datos_suavizados = np.convolve(datos_barrido, np.ones(3)/3, mode='valid')
-        idx_min = np.argmin(datos_suavizados)
-
-        pasos_a_volver = pasos_totales - idx_min
-
-        for _ in range(pasos_a_volver):
-            hardware_girar_izquierda(spinTime, power)
-            time.sleep(timeBetweenSteps)
-
-    np.set_printoptions(precision=4, suppress=True)
-    print("Barrido: ")
-    print(np.array(datos_barrido))
-    print("Suavizados: ")
-    print(np.array(datos_suavizados))
-    print(f"ArgMin: {idx_min}")
-
-#Camera related functions
-# def stream_video_pi():
-#     while True:
-#         try:
-#             inicio_conexion = time.time()
-#             ws = websocket.WebSocket()
-#             ws.connect(WS_VIDEO_URL, timeout=3) 
-#             print("🟢 Conexión de vídeo establecida con FastAPI.")
-            
-#             while True:
-#                 if time.time() - inicio_conexion > 30:
-#                     ws.close()
-#                     break
-                
-#                 if MODO_SIMULACION:
-#                     frame = np.zeros((616, 820, 3), dtype=np.uint8) # Pantalla negra
-#                 else:
-#                     frame_yuv = picam2.capture_array("lores")
-#                     frame = cv2.cvtColor(frame_yuv, cv2.COLOR_YUV2BGR_I420)
-                
-#                 if not camara_activa.is_set():
-#                     camara_activa.set()
-                
-#                 success, buffer = cv2.imencode('.jpg', frame, [int(cv2.IMWRITE_JPEG_QUALITY), 30])
-#                 if not success: continue
-                
-#                 frame_b64 = base64.b64encode(buffer).decode('utf-8')
-                
-#                 try:
-#                     ws.send(frame_b64)
-#                 except Exception:
-#                     break 
-                
-#                 time.sleep(0.05)
-#         except Exception:
-#             time.sleep(0.2)
-
-def resize_frame(frame):
-    if frame is None: return None
-    return cv2.resize(frame, outputCameraRes)
+def abrirPuerta():
+    turnRight()
+    controlar_electroiman(1)
+    turnLeft()
 
 def generate_mapping_sources(img):
     """Genera la homografía en blanco y negro para el análisis del mapa."""
@@ -379,7 +110,8 @@ def generate_mapping_sources(img):
     h, w = img.shape[:2]
     scale_x, scale_y = w / Base_W, h / Base_H
 
-    pts_src = np.array([[322, 2463], [2956, 2463], [1886, 872], [1394, 872]], dtype=np.float32)
+    pts_src = np.array([[600, 2460], [2792, 2460], [1920, 944], [1400, 944]], dtype=np.float32)
+
     pts_src[:, 0] *= scale_x  
     pts_src[:, 1] *= scale_y  
 
@@ -440,49 +172,105 @@ def generate_mapping_sources(img):
     mask_final = cv2.warpPerspective(mask_orig, H_final, (WIDTH, HEIGHT), borderValue=0)
     mask_final = cv2.morphologyEx(mask_final, cv2.MORPH_CLOSE, kernel)
     
+    print("INFO: Procesamiento morfológico terminado. Dibujando puntos...")
 
-    return mask_final, cv2.resize(img, outputCameraRes)
+    lado = 51
+    mitad = lado // 2
+    color_azul = (255, 0, 0) # Azul puro en BGR
 
-# --- Movimiento Físico y Sincronización Directa ---
-def sleep_preciso_hardware(segundos):
-    if segundos <= 0: return
-    objetivo = time.perf_counter() + segundos
-    while time.perf_counter() < objetivo:
-        pass
+    try:
+        from pathlib import Path
+        directorio = Path(__file__).parent
+    except NameError:
+        # Si __file__ falla (ej. estás en Jupyter/Colab), usamos la carpeta actual
+        import os
+        directorio = os.getcwd()
+    except Exception as e:
+        print(f"Error inesperado con la ruta: {e}")
+        directorio = ""
 
-def detener_motores():
-    if not MODO_SIMULACION:
-        mA_pwm.value = 0.0
-        mA_in1.off()
-        mA_in2.off()
-        mB_pwm.value = 0.0
-        mB_in1.off()
-        mB_in2.off()
+    img_original_dibujada = img.copy()
+    
+    # pts_src ya tiene las coordenadas ajustadas a la escala de la imagen original
+    for (x, y) in pts_src:
+        x, y = int(x), int(y)
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        cv2.rectangle(img_original_dibujada, pt1, pt2, color_azul, thickness=-1)
 
-def hardware_avanzar():
-    if not MODO_SIMULACION:
-        mA_in1.on(); mA_in2.off(); mA_pwm.value = POTENCIA_MOTORES_AVANCE
-        mB_in1.on(); mB_in2.off(); mB_pwm.value = POTENCIA_MOTORES_AVANCE
+    # Usamos os.path.join o el operador / de Path de forma segura
+    ruta_salida = f"{directorio}/org_dotted.jpg"
 
-def hardware_girar_izquierda(tiempo, potencia = None):
-    if not MODO_SIMULACION:
-        if potencia == None:
-            potencia = POTENCIA_MOTORES_GIRO
-        # Motor A va hacia atrás, Motor B hacia adelante (Giro sobre su propio eje)
-        mA_in1.off(); mA_in2.on(); mA_pwm.value = potencia
-        mB_in1.on(); mB_in2.off(); mB_pwm.value = potencia
-        sleep_preciso_hardware(tiempo * 1.1)
-        detener_motores()
+    # 3. Exportar y verificar éxito
+    exito = cv2.imwrite(ruta_salida, img_original_dibujada)
+    
+    if exito:
+        print(f"✅ ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+    else:
+        print(f"❌ ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
 
-def hardware_girar_derecha(tiempo, potencia = None):
-    if not MODO_SIMULACION:
-        if potencia == None:
-            potencia = POTENCIA_MOTORES_GIRO
-        # Motor A va hacia adelante, Motor B hacia atrás
-        mA_in1.on(); mA_in2.off(); mA_pwm.value = potencia
-        mB_in1.off(); mB_in2.on(); mB_pwm.value = potencia
-        sleep_preciso_hardware(tiempo)
-        detener_motores()
+    # 1. Convertir la máscara a 3 canales para poder dibujar en rojo
+    mask_color = cv2.cvtColor(mask_final, cv2.COLOR_GRAY2BGR)
+
+    pts_src_formateados = np.array([pts_src], dtype=np.float32)
+    esquinas_finales = cv2.perspectiveTransform(pts_src_formateados, H_final)[0]
+
+    for (x, y) in esquinas_finales:
+        x, y = int(x), int(y) # Tienen que ser enteros para poder dibujar
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        cv2.rectangle(mask_color, pt1, pt2, color_azul, thickness=-1)
+
+        interpretationSpots = np.array([
+    #MIDDLE
+    [400, 2660],
+    [400, 2640],
+    [400, 2300],
+    [400, 2100],
+    [400, 1700],
+    [400, 1500],
+    [400, 1100],
+    [400,  900],
+    [400,  500],
+    [400,  300],
+
+    #LEFT
+    [50, 2630],
+    [50, 2065],
+    [50, 1450],
+    [50,  815],
+    [50,  180],
+
+    #RIGHT
+    [760, 2630],
+    [760, 2065],
+    [760, 1450],
+    [760,  815],
+    [760,  180]], 
+    dtype=np.int32)
+
+    color_rojo = (0, 0, 255) # Ahora sí será rojo puro
+    
+    for (x, y) in interpretationSpots:
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        # OJO: Dibujamos sobre mask_color, no sobre mask_final
+        cv2.rectangle(mask_color, pt1, pt2, color_rojo, thickness=-1)
+
+    print("INFO: Puntos dibujados. Preparando exportación...")
+
+    # Usamos os.path.join o el operador / de Path de forma segura
+    ruta_salida = f"{directorio}/img_dotted.jpg"
+
+    # 3. Exportar y verificar éxito
+    exito = cv2.imwrite(ruta_salida, mask_color)
+    
+    if exito:
+        print(f"✅ ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+    else:
+        print(f"❌ ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
+
+    return mask_final
 
 def moveForward(nTiles):
     global tempPos, lastTurn
@@ -491,18 +279,17 @@ def moveForward(nTiles):
     additions = {'u': (0, 1), 'r': (1, 0), 'd': (0, -1), 'l': (-1, 0)}
     addition = additions.get(tempDir, (0, 0))
 
-    if not MODO_SIMULACION: hardware_avanzar() # Solo Pi
+    v_angular = 1
+    v_lineal = v_angular * 0.04
+    t = 0.25 / v_lineal
+    aplicarVelocidades(v_angular, v_angular)
 
     for _ in range(nTiles):
+        esperarPasos(t)
         tempPos = (tempPos[0] + addition[0], tempPos[1] + addition[1])
         sync_position_with_server()
-        
-        if MODO_SIMULACION:
-            moverCasilla(1) # Lógica de Coppelia
-        else:
-            sleep_preciso_hardware(TIEMPO_AVANCE_CASILLA) # Lógica Pi
-            
-    if not MODO_SIMULACION: detener_motores()
+    
+    frenar()
     lastTurn = 'X'
     time.sleep(0.5)
 
@@ -512,10 +299,7 @@ def turnLeft():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    if MODO_SIMULACION:
-        girar(1, 90) # Lógica de Coppelia (grados > 0 -> Izquierda)
-    else:
-        hardware_girar_izquierda(TIEMPO_GIRO)
+    girar(1, 90)
         
     lastTurn = 'l'
     time.sleep(0.5)
@@ -526,11 +310,8 @@ def turnRight():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    if MODO_SIMULACION:
-        girar(1, -90) # Lógica de Coppelia (grados < 0 -> Derecha)
-    else:
-        hardware_girar_derecha(TIEMPO_GIRO)
-        
+    girar(1, -90) # Lógica de Coppelia (grados < 0 -> Derecha)
+
     lastTurn = 'r'
     time.sleep(0.5)
 
@@ -540,21 +321,10 @@ def turnBack():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    if MODO_SIMULACION:
-        girar(1, 180) # Lógica de Coppelia
-    else:
-        hardware_girar_derecha(TIEMPO_GIRO * 2)
+    girar(1, 180)
         
     lastTurn = 'r'
     time.sleep(0.5)
-
-def pickUpKey():
-    rele.on()
-    time.sleep(10)
-    rele.off()
-
-def openDoor():
-    print("Puerta")
 
 # --- Peticiones de Análisis a la VM ---
 def sync_position_with_server():
@@ -645,25 +415,14 @@ def robot_loop():
                 continue
         if estado_actual == "ESCANEO":
             if estado_actual == "ESCANEO":
-                if MODO_SIMULACION:
-                    print("📸 Capturando frame en tiempo real desde CoppeliaSim...")
-                    frame_bgr = obtener_imagen_simulador()
-                    # Por seguridad, si el simulador falla, dejamos tu antiguo código como fallback
-                    if frame_bgr is None:
-                        iname = imgNames[image_idx] if image_idx < len(imgNames) else "wall"
-                        frame_bgr = cv2.imread(f"{real}/{iname}.jpg")
-                else:
-                    print("📸 Tomando foto real en la Raspberry Pi...")
-                    # (Aquí se mantiene tu lógica original de picamera2 para el robot físico)
-                    iname = imgNames[image_idx] if image_idx < len(imgNames) else "wall"
-                    img_path = f"{real}/{iname}_reduced.jpg"
-                    frame_bgr = cv2.imread(img_path)
+                print("📸 Capturando frame en tiempo real desde CoppeliaSim...")
+                frame_bgr = obtener_imagen_simulador()
                 
-                homography, resized = generate_mapping_sources(frame_bgr)
+                homography = generate_mapping_sources(frame_bgr)
                 if homography is None:
                     time.sleep(1); continue
                     
-                dest_type, commands = send_robot_step(homography, resized)
+                dest_type, commands = send_robot_step(homography, frame_bgr)
                 if dest_type is None:
                     time.sleep(2); continue
                     
@@ -690,6 +449,9 @@ def robot_loop():
                 
             elif dest_type == 'D':
                 print(f"Acción en casilla: Interactuando con la puerta...")
+
+                abrirPuerta()
+
                 try:
                     requests.post(f"{SERVER_URL}/interactuar", json={"tipo": 'D'})
                 except requests.exceptions.RequestException: pass
@@ -699,10 +461,8 @@ def robot_loop():
             elif dest_type == 'K':
                 print(f"Acción en casilla: Interactuando con la llave...")
 
-                if not MODO_SIMULACION:
-                    pickUpKey()
-                else:
-                    pillarLlave()
+                pillarLlave()
+                    
                 try:
                     requests.post(f"{SERVER_URL}/interactuar", json={"tipo": 'K'})
                 except requests.exceptions.RequestException: pass
@@ -712,19 +472,8 @@ def robot_loop():
 
             elif dest_type == '?':
                 print("❓ Inspeccionando interrogante (QR) en el simulador...")
-                turnBack()
-                moveForward(1)
-                turnBack()
-                if MODO_SIMULACION:
-                    frame = obtener_imagen_simulador()
-                    if frame is None:
-                        img_path = f"{real}/{imgQRs[qr_idx] if qr_idx < len(imgQRs) else imgQRs[0]}.jpg"
-                        frame = cv2.imread(img_path)
-                else:
-                    img_path = f"{real}/{imgQRs[qr_idx] if qr_idx < len(imgQRs) else imgQRs[0]}.jpg"
-                    frame = cv2.imread(img_path)
 
-                moveForward(1)
+                frame = obtener_imagen_simulador()
 
                 frame_pequeno = cv2.resize(frame, (820, 616))
                 success, buffer = cv2.imencode('.jpg', frame_pequeno, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
@@ -751,7 +500,6 @@ def robot_loop():
                         pass
                     
                     if not interaccion_terminada:
-                        # Si no ha terminado, el robot sigue parado sin hacer nada
                         time.sleep(2) 
                 
                 print("🎙️ Respuesta procesada por Gemini. ¡El robot continúa!")
@@ -769,119 +517,46 @@ def robot_loop():
                 
         time.sleep(0.1)
 
-imgNames = ["img_28", "img_3", "wall", "wall", "wall", "wall", "img_23", "img_7", "img_29", "wall", "wall", "img_53", "wall", "img_34"]
-imgQRs = ["img_X", "img_Y", "img_Z"]
-    
 if __name__ == "__main__":
     try:
-        # ⚙️ TIEMPOS DE CALIBRACIÓN
-        
-
-
-        if MODO_SIMULACION:
-            TIEMPO_AVANCE_CASILLA = 6.25 # Segundos que tarda en avanzar 1 casilla entera
-            TIEMPO_GIRO = 3.6324665057131984     # Segundos que tarda en rotar 90 grados
-            POTENCIA_MOTORES_AVANCE = 0.3
-            POTENCIA_MOTORES_GIRO = 0.3
-        
-            print("[💻] INICIANDO EN MODO SIMULACIÓN (PC)...")
-            # Conexión a CoppeliaSim
-            sim.simxFinish(-1)
-            clientID = sim.simxStart('127.0.0.1', 19999, True, True, 2000, 5)
-            if clientID == 0:
-                print("✅ Conectado a CoppeliaSim en el puerto 19999")
-            else:
-                print("❌ No se pudo conectar a CoppeliaSim")
-                os._exit(1)
-            
-            # Modo síncrono
-            sim.simxSynchronous(clientID, True)
-            sim.simxStartSimulation(clientID, sim.simx_opmode_blocking)
-
-            # Obtener handles
-            _, camara = sim.simxGetObjectHandle(clientID, 'Vision_sensor', sim.simx_opmode_blocking)
-            _, ruedaDerecha = sim.simxGetObjectHandle(clientID, 'RuedaR', sim.simx_opmode_blocking)
-            _, ruedaIzquierda = sim.simxGetObjectHandle(clientID, 'RuedaL', sim.simx_opmode_blocking)
-            _, ultrasonidoDerecha = sim.simxGetObjectHandle(clientID, 'SensorR', sim.simx_opmode_blocking)
-            _, ultrasonidoIzquierda = sim.simxGetObjectHandle(clientID, 'SensorL', sim.simx_opmode_blocking)
-            _, ultrasonidoDelante = sim.simxGetObjectHandle(clientID, 'SensorD', sim.simx_opmode_blocking)
-            _, ultrasonidoAtras = sim.simxGetObjectHandle(clientID, 'SensorA', sim.simx_opmode_blocking)
-
-            # Mapeo de sensores para la lógica de paredes
-            SENSORES_SIM = {
-                "Delantero": ultrasonidoDelante,
-                "Izquierda": ultrasonidoIzquierda,
-                "Derecha": ultrasonidoDerecha,
-                "Trasero": ultrasonidoAtras
-            }
+        TIEMPO_AVANCE_CASILLA = 6.25 # Segundos que tarda en avanzar 1 casilla entera
+        TIEMPO_GIRO = 3.6324665057131984     # Segundos que tarda en rotar 90 grados
+        POTENCIA_MOTORES_AVANCE = 0.3
+        POTENCIA_MOTORES_GIRO = 0.3
+    
+        print("[💻] INICIANDO EN MODO SIMULACIÓN (PC)...")
+        # Conexión a CoppeliaSim
+        sim.simxFinish(-1)
+        clientID = sim.simxStart('127.0.0.1', 19999, True, True, 2000, 5)
+        if clientID == 0:
+            print("✅ Conectado a CoppeliaSim en el puerto 19999")
         else:
-            TIEMPO_AVANCE_CASILLA = 0.5 # Segundos que tarda en avanzar 1 casilla entera
-            TIEMPO_GIRO = 1.0           # Segundos que tarda en rotar 90 grados
-            POTENCIA_MOTORES_AVANCE = 0.3
-            POTENCIA_MOTORES_GIRO = 0.3
-
-            print("[🤖] INICIANDO EN MODO FÍSICO (RASPBERRY PI)...")
-            print("[+] Inicializando pines para los Motores A y B...")
-            mA_in1 = OutputDevice(20, initial_value=False)
-            mA_in2 = OutputDevice(16, initial_value=False)
-            mA_pwm = PWMOutputDevice(12, initial_value=0.0)
-
-            mB_in1 = OutputDevice(6, initial_value=False)
-            mB_in2 = OutputDevice(19, initial_value=False)
-            mB_pwm = PWMOutputDevice(13, initial_value=0.0)
-
-            print("[+] Preparando pines para los Ultrasonidos...")
-            SENSORES = {
-                "Delantero": DistanceSensor(echo=11, trigger=8, max_distance=3.0, queue_len=1),
-                "Izquierda": DistanceSensor(echo=22, trigger=23, max_distance=3.0, queue_len=1),
-                "Derecha":   DistanceSensor(echo=18, trigger=17, max_distance=3.0, queue_len=1),
-                "Trasero":  DistanceSensor(echo=9,  trigger=25, max_distance=3.0, queue_len=1)
-            }
-
-            print("[+] Inicializando pines para el selenoide...")
-            rele = OutputDevice(26, active_high=True, initial_value=False)
-
-
-            print("[+] Configurando Doble Flujo de vídeo en hardware...")
-            config = picam2.create_preview_configuration(
-                main={"size": (3280, 2464), "format": "RGB888"},
-                lores={"size": (820, 616), "format": "YUV420"}
-            )
-            config["sensor_mode"] = 0
-            picam2.configure(config)
-            picam2.start()
-            
-            print("[+] Calibrando sensor...")
-            time.sleep(2.0)
-
-            # # ✅ LANZAMOS EL NUEVO HILO DE VÍDEO PI
-            # # threading.Thread(target=stream_video_pi, daemon=True).start()
+            print("❌ No se pudo conectar a CoppeliaSim")
+            os._exit(1)
         
-            # print("[*] Esperando a que la cámara capture el primer frame...")
-            # camara_activa.wait() # Se detiene aquí hasta que el vídeo funcione
-            # print("[+] Cámara lista y transmitiendo. Iniciando robot.")
+        # Modo síncrono
+        sim.simxSynchronous(clientID, True)
+        sim.simxStartSimulation(clientID, sim.simx_opmode_blocking)
 
-            # print("[+] Inicializando secuencia del robot físico en la Raspberry Pi.")
+        # Obtener handles
+        _, camara = sim.simxGetObjectHandle(clientID, 'Vision_sensor', sim.simx_opmode_blocking)
+        _, ruedaDerecha = sim.simxGetObjectHandle(clientID, 'RuedaR', sim.simx_opmode_blocking)
+        _, ruedaIzquierda = sim.simxGetObjectHandle(clientID, 'RuedaL', sim.simx_opmode_blocking)
+        _, ultrasonidoDerecha = sim.simxGetObjectHandle(clientID, 'SensorR', sim.simx_opmode_blocking)
+        _, ultrasonidoIzquierda = sim.simxGetObjectHandle(clientID, 'SensorL', sim.simx_opmode_blocking)
+        _, ultrasonidoDelante = sim.simxGetObjectHandle(clientID, 'SensorD', sim.simx_opmode_blocking)
+        _, ultrasonidoAtras = sim.simxGetObjectHandle(clientID, 'SensorA', sim.simx_opmode_blocking)
+
+        # Mapeo de sensores para la lógica de paredes
+        SENSORES_SIM = {
+            "Delantero": ultrasonidoDelante,
+            "Izquierda": ultrasonidoIzquierda,
+            "Derecha": ultrasonidoDerecha,
+            "Trasero": ultrasonidoAtras
+        }
         
         send_reset_command()
         robot_loop()
 
-        # for _ in range(2):
-        #     turnLeft()
-        #     orientate()
-        #     turnRight()
-        #     orientate()
-
     except KeyboardInterrupt:
         print("\n[!] Simulación detenida manualmente.")
-
-    finally:
-        print("\n[*] Apagando motores de forma segura y liberando pines...")
-        detener_motores()
-        if not MODO_SIMULACION:
-            mA_in1.close(); mA_in2.close(); mA_pwm.close()
-            mB_in1.close(); mB_in2.close(); mB_pwm.close()
-            picam2.stop()
-            rele.off()
-        print("[+] Hardware liberado. Fin del programa.")
-        os._exit(0)
