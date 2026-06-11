@@ -16,7 +16,7 @@ import math
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
 
-distancesByNTiles = { 1 : 46, 2 : 95}
+distancesByNTiles = { 1 : 17, 2 : 33, 3 : 50, 4 : 190}
 
 imageForProcessingName = "proc"
 outputCameraRes = (820, 616)
@@ -31,33 +31,192 @@ def esperarPasos(tiempo):
     for _ in range(pasos):
         sim.simxSynchronousTrigger(clientID)
 
+VEL_MAX_RAD_S = 10.0
+
+def pwm_a_rads(pwm_value):
+    pwm_limpio = max(0.0, min(1.0, pwm_value))
+    return pwm_limpio * VEL_MAX_RAD_S
+
+currentDir = (0, 0)
+
+def configurar_direcciones(di, dd):
+    global currentDir
+    currentDir = (di, dd)
+
 def aplicarVelocidades(vel_izq, vel_der):
-    sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, vel_izq, sim.simx_opmode_oneshot)
-    sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   vel_der, sim.simx_opmode_oneshot)
+    sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, vel_izq * currentDir[0], sim.simx_opmode_oneshot)
+    sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   vel_der * currentDir[1], sim.simx_opmode_oneshot)
 
-def frenar():
-    aplicarVelocidades(0, 0)
-
-def girar(v_angular, grados):
-    radio_rueda = 0.04
-    L = 0.185
-    v_angular_abs = abs(v_angular)
-    grados_abs = abs(grados)
-    radianes_giro = math.radians(grados_abs)
-    distancia_rueda = radianes_giro * (L / 2)
-    v_lineal = v_angular_abs * radio_rueda
-    t = distancia_rueda / v_lineal
+def obtener_distancia(nombre):
+    s = SENSORES_SIM["Derecha"] if nombre == "Izquierda" else (SENSORES_SIM["Izquierda"] if nombre == "Derecha" else SENSORES_SIM[nombre])
     
-    if grados > 0: # Antihorario (Izquierda)
-        vel_izq = -v_angular_abs
-        vel_der = v_angular_abs
-    else:          # Horario (Derecha)
-        vel_izq = v_angular_abs
-        vel_der = -v_angular_abs
+    returnCode, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector = sim.simxReadProximitySensor(clientID, s, sim.simx_opmode_blocking)
+    
+    if returnCode == sim.simx_return_ok and detectionState:
+        distancia_metros = math.sqrt(detectedPoint[0]**2 + detectedPoint[1]**2 + detectedPoint[2]**2)
+        return distancia_metros * 100.0 # Convertir a cm
+    
+    return 999.0
 
-    aplicarVelocidades(vel_izq, vel_der)
-    esperarPasos(t) 
-    frenar()
+def detener_motores():
+    aplicarVelocidades(0, 0)
+    configurar_direcciones(0, 0)
+    sim.simxSynchronousTrigger(clientID)
+
+def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1.75):
+    print(f"[↺] Giro hacia la {direccion} de forma lenta y controlada...")
+    
+    VEL_BASE_FASE1 = 0.1
+    VEL_PICO_FASE1 = 0.2
+    VEL_BARRIDO_ATRAS = 0.1
+    VEL_ESCANEO = 0.02
+    VEL_CORRECCION = 0.3
+
+    dir_giro = (1, -1) if direccion == "derecha" else (-1, 1)
+    dir_atras = (-1, 1) if direccion == "derecha" else (1, -1)
+
+    configurar_direcciones(*dir_giro)
+    pasos_totales = int(tiempo_estimado / 0.05)
+
+    for paso in range(pasos_totales):
+        progreso = paso / pasos_totales
+        curva_velocidad = VEL_BASE_FASE1 + VEL_PICO_FASE1 * math.sin(progreso * math.pi)
+        pwm = pwm_a_rads(max(0.0, min(1.0, curva_velocidad)))
+        
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.2)
+
+    # Fase 2: Barrido
+    configurar_direcciones(*dir_atras) 
+    pwm_atras = pwm_a_rads(VEL_BARRIDO_ATRAS)
+    aplicarVelocidades(pwm_atras, pwm_atras)    
+    esperarPasos(0.60)                    
+    detener_motores()
+    esperarPasos(0.2)
+    
+    configurar_direcciones(*dir_giro) 
+    pwm_escaneo = pwm_a_rads(VEL_ESCANEO)
+    aplicarVelocidades(pwm_escaneo, pwm_escaneo)
+
+    dist_del = obtener_distancia("Delantero")
+    dist_tras = obtener_distancia("Inferior")
+    
+    if dist_del < dist_tras:
+        sensor_escaneo = "Delantero"
+        dist_minima = dist_del
+    else:
+        sensor_escaneo = "Inferior"
+        dist_minima = dist_tras
+    
+    pasos_escaneo_max = int(2.5 / 0.05) 
+    for _ in range(pasos_escaneo_max):
+        dist_actual = obtener_distancia(sensor_escaneo)        
+        
+        if dist_actual != 999.0:
+            if dist_actual < dist_minima: 
+                dist_minima = dist_actual
+            if dist_minima != 999.0 and dist_actual > (dist_minima + 0.3): 
+                break
+        sim.simxSynchronousTrigger(clientID)
+
+    configurar_direcciones(*dir_atras) 
+    pwm_fin = pwm_a_rads(VEL_CORRECCION)
+    aplicarVelocidades(pwm_fin, pwm_fin)
+    esperarPasos(0.16)                    
+    detener_motores()
+
+def avanzar_corrigiendo(distancia_cm=56):
+    tiempo_estimado = (distancia_cm * 1.5) / 50.0
+    print(f"[~] Avanzando {distancia_cm}cm...")
+    Kp, Kd = 0.008, 0.008
+    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.15
+    dist_izq_ant = dist_der_ant = None
+
+    # Fase 1: Avance grueso
+    configurar_direcciones(1, 1)
+    pasos_totales = int(tiempo_estimado / 0.05)
+
+    for paso in range(pasos_totales):        
+        progreso = paso / pasos_totales
+        potencia = max(0.0, min(1.0, 0.15 + 0.45 * math.sin(progreso * math.pi)))
+        cambio_izq = cambio_der = correccion = 0.0
+        
+        dist_izq, dist_der = obtener_distancia("Izquierda"), obtener_distancia("Derecha")
+        if dist_izq < UMBRAL_PARED:
+            if dist_izq_ant is not None and dist_izq_ant < UMBRAL_PARED: cambio_izq = dist_izq - dist_izq_ant  
+            correccion += ((dist_izq - TARGET_CERCA) * Kp) + (cambio_izq * Kd)
+            dist_izq_ant = dist_izq
+        else: dist_izq_ant = None 
+
+        if dist_der < UMBRAL_PARED:
+            if dist_der_ant is not None and dist_der_ant < UMBRAL_PARED: cambio_der = dist_der - dist_der_ant  
+            correccion -= ((dist_der - TARGET_CERCA) * Kp) + (cambio_der * Kd)
+            dist_der_ant = dist_der
+        else: dist_der_ant = None
+
+        mI_pwm = max(0.12, min(0.95, potencia + correccion))
+        mD_pwm = max(0.12, min(0.95, potencia - correccion))
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.2)
+
+    # Fase 2: Ajuste longitudinal fino
+    dist_del, dist_tras = obtener_distancia("Delantero"), obtener_distancia("Inferior")
+    sensor_elegido = "Delantero" if dist_del < dist_tras else "Inferior"
+    dist_inicial = dist_del if dist_del < dist_tras else dist_tras
+
+    if dist_inicial > 45.0:
+        detener_motores()
+        return
+
+    target = 5.0 if dist_inicial < 17.5 else 30.0
+    dist_izq_ant = dist_der_ant = None
+    target_izq = obtener_distancia("Izquierda") if obtener_distancia("Izquierda") < UMBRAL_PARED else TARGET_CERCA
+    target_der = obtener_distancia("Derecha") if obtener_distancia("Derecha") < UMBRAL_PARED else TARGET_CERCA
+
+    while True:
+        dist_actual = obtener_distancia(sensor_elegido)
+        error = dist_actual - target
+        if abs(error) < 0.5: break
+
+        moviendo_adelante = True
+        if sensor_elegido == "Delantero":
+            if error > 0: configurar_direcciones(1, 1)
+            else: configurar_direcciones(-1, -1); moviendo_adelante = False
+        else: 
+            if error > 0: configurar_direcciones(-1, -1); moviendo_adelante = False
+            else: configurar_direcciones(1, 1)
+
+        dist_izq, dist_der = obtener_distancia("Izquierda"), obtener_distancia("Derecha")
+        correccion_lateral = 0.0
+
+        if dist_izq < UMBRAL_PARED:
+            cambio_izq = (dist_izq - dist_izq_ant) if dist_izq_ant is not None else 0.0
+            correccion_lateral += (dist_izq - target_izq) * Kp + (cambio_izq * Kd)
+            dist_izq_ant = dist_izq
+            
+        if dist_der < UMBRAL_PARED:
+            cambio_der = (dist_der - dist_der_ant) if dist_der_ant is not None else 0.0
+            correccion_lateral -= (dist_der - target_der) * Kp + (cambio_der * Kd)
+            dist_der_ant = dist_der
+
+        if not moviendo_adelante: correccion_lateral = -correccion_lateral
+
+        mI_pwm = max(0.10, min(0.25, POTENCIA_FINA - correccion_lateral))
+        mD_pwm = max(0.10, min(0.25, POTENCIA_FINA + correccion_lateral))
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.2)
 
 def obtener_imagen_simulador():
     """Captura el frame actual del Vision_sensor de CoppeliaSim y lo adapta a OpenCV (BGR)."""
@@ -72,21 +231,11 @@ def obtener_imagen_simulador():
 
     return img
 
-def avanzar(velocidad, tiempo):
-    v = velocidad
-    sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, v, sim.simx_opmode_blocking)
-    sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   v, sim.simx_opmode_blocking)
-    esperarPasos(tiempo)
-    sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, 0, sim.simx_opmode_blocking)
-    sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   0, sim.simx_opmode_blocking)
-
 def controlar_electroiman(estado):
     sim.simxSetIntegerSignal(clientID, "estado_iman", estado, sim.simx_opmode_blocking)
 
 def pillarLlave():
     controlar_electroiman(1)
-    avanzar(1, 1)
-    avanzar(-1, 1)
 
 def abrirPuerta():
     turnRight()
@@ -279,19 +428,14 @@ def moveForward(nTiles):
     additions = {'u': (0, 1), 'r': (1, 0), 'd': (0, -1), 'l': (-1, 0)}
     addition = additions.get(tempDir, (0, 0))
 
-    v_angular = 1
-    v_lineal = v_angular * 0.04
-    t = 0.25 / v_lineal
-    aplicarVelocidades(v_angular, v_angular)
-
+    avanzar_corrigiendo(distancesByNTiles[nTiles])
     for _ in range(nTiles):
-        esperarPasos(t)
         tempPos = (tempPos[0] + addition[0], tempPos[1] + addition[1])
         sync_position_with_server()
+        esperarPasos(0.2)
     
-    frenar()
     lastTurn = 'X'
-    time.sleep(0.5)
+    esperarPasos(0.5)
 
 def turnLeft():
     global tempDir, lastTurn
@@ -299,10 +443,10 @@ def turnLeft():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    girar(1, 90)
+    girar_suave(direccion="izquierda")
         
     lastTurn = 'l'
-    time.sleep(0.5)
+    esperarPasos(0.5)
 
 def turnRight():
     global tempDir, lastTurn
@@ -310,10 +454,10 @@ def turnRight():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    girar(1, -90) # Lógica de Coppelia (grados < 0 -> Derecha)
+    girar_suave(direccion="derecha")
 
     lastTurn = 'r'
-    time.sleep(0.5)
+    esperarPasos(0.5)
 
 def turnBack():
     global tempDir, lastTurn
@@ -321,10 +465,10 @@ def turnBack():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    girar(1, 180)
+    girar_suave(direccion="izquierda", tiempo_estimado=3.5)
         
     lastTurn = 'r'
-    time.sleep(0.5)
+    esperarPasos(0.5)
 
 # --- Peticiones de Análisis a la VM ---
 def sync_position_with_server():
@@ -552,7 +696,7 @@ if __name__ == "__main__":
             "Delantero": ultrasonidoDelante,
             "Izquierda": ultrasonidoIzquierda,
             "Derecha": ultrasonidoDerecha,
-            "Trasero": ultrasonidoAtras
+            "Inferior": ultrasonidoAtras
         }
         
         send_reset_command()
