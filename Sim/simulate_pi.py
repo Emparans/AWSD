@@ -16,7 +16,7 @@ import math
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
 
-distancesByNTiles = { 1 : 17, 2 : 33, 3 : 50, 4 : 190}
+distancesByNTiles = { 1 : 25, 2 : 50, 3 : 75, 4 : 100}
 
 imageForProcessingName = "proc"
 outputCameraRes = (820, 616)
@@ -27,7 +27,7 @@ tempPos = (0, 0)
 lastTurn = 'X'
 
 def esperarPasos(tiempo):
-    pasos = int(tiempo / 0.05)
+    pasos = int(tiempo / 0.01)
     for _ in range(pasos):
         sim.simxSynchronousTrigger(clientID)
 
@@ -63,20 +63,20 @@ def detener_motores():
     configurar_direcciones(0, 0)
     sim.simxSynchronousTrigger(clientID)
 
-def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1.75):
+def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1):
     print(f"[↺] Giro hacia la {direccion} de forma lenta y controlada...")
     
-    VEL_BASE_FASE1 = 0.1
-    VEL_PICO_FASE1 = 0.2
-    VEL_BARRIDO_ATRAS = 0.1
-    VEL_ESCANEO = 0.02
-    VEL_CORRECCION = 0.3
+    VEL_BASE_FASE1 = 0.03
+    VEL_PICO_FASE1 = 0.11
+    VEL_BARRIDO_ATRAS = 0.08
+    VEL_ESCANEO = 0.03
+    VEL_CORRECCION = 0.11
 
     dir_giro = (1, -1) if direccion == "derecha" else (-1, 1)
     dir_atras = (-1, 1) if direccion == "derecha" else (1, -1)
 
     configurar_direcciones(*dir_giro)
-    pasos_totales = int(tiempo_estimado / 0.05)
+    pasos_totales = int(tiempo_estimado / 0.01)
 
     for paso in range(pasos_totales):
         progreso = paso / pasos_totales
@@ -88,31 +88,33 @@ def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1.75):
         sim.simxSynchronousTrigger(clientID)
 
     detener_motores()
-    esperarPasos(0.2)
+    esperarPasos(0.1)
 
-    # Fase 2: Barrido
     configurar_direcciones(*dir_atras) 
     pwm_atras = pwm_a_rads(VEL_BARRIDO_ATRAS)
     aplicarVelocidades(pwm_atras, pwm_atras)    
-    esperarPasos(0.60)                    
+    esperarPasos(0.4)                    
     detener_motores()
-    esperarPasos(0.2)
+    esperarPasos(0.1)
     
     configurar_direcciones(*dir_giro) 
     pwm_escaneo = pwm_a_rads(VEL_ESCANEO)
     aplicarVelocidades(pwm_escaneo, pwm_escaneo)
-
-    dist_del = obtener_distancia("Delantero")
-    dist_tras = obtener_distancia("Inferior")
     
-    if dist_del < dist_tras:
-        sensor_escaneo = "Delantero"
-        dist_minima = dist_del
+    sensor_escaneo = "Inferior"
+    nombres_sensores = ["Delantero", "Inferior", "Izquierda", "Derecha"]
+    distancias = {sensor: obtener_distancia(sensor) for sensor in nombres_sensores}
+    distancias_validas = {s: d for s, d in distancias.items() if d != 999.0}
+    if distancias_validas:
+        sensor_escaneo = min(distancias_validas, key=distancias_validas.get)
+        dist_minima = distancias_validas[sensor_escaneo]
     else:
-        sensor_escaneo = "Inferior"
-        dist_minima = dist_tras
+        sensor_escaneo = "Inferior" # Fallback por defecto si estamos en espacio abierto
+        dist_minima = 999.0
+            
+    print(f"[*] Sensor de escaneo elegido: {sensor_escaneo}")
     
-    pasos_escaneo_max = int(2.5 / 0.05) 
+    pasos_escaneo_max = int(2.5 / 0.01) 
     for _ in range(pasos_escaneo_max):
         dist_actual = obtener_distancia(sensor_escaneo)        
         
@@ -129,20 +131,21 @@ def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1.75):
     esperarPasos(0.16)                    
     detener_motores()
 
-def avanzar_corrigiendo(distancia_cm=56):
-    tiempo_estimado = (distancia_cm * 1.5) / 50.0
+def avanzar_corrigiendo(distancia_cm=25):
+    tiempo_estimado = (distancia_cm) / 70.0 
     print(f"[~] Avanzando {distancia_cm}cm...")
-    Kp, Kd = 0.008, 0.008
-    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.15
+    Kp, Kd = 0.002, 0.002
+    
+    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.06 
     dist_izq_ant = dist_der_ant = None
 
     # Fase 1: Avance grueso
     configurar_direcciones(1, 1)
-    pasos_totales = int(tiempo_estimado / 0.05)
+    pasos_totales = int(tiempo_estimado / 0.01)
 
     for paso in range(pasos_totales):        
         progreso = paso / pasos_totales
-        potencia = max(0.0, min(1.0, 0.15 + 0.45 * math.sin(progreso * math.pi)))
+        potencia = max(0.0, min(1.0, 0.05 + 0.15 * math.sin(progreso * math.pi)))
         cambio_izq = cambio_der = correccion = 0.0
         
         dist_izq, dist_der = obtener_distancia("Izquierda"), obtener_distancia("Derecha")
@@ -158,8 +161,8 @@ def avanzar_corrigiendo(distancia_cm=56):
             dist_der_ant = dist_der
         else: dist_der_ant = None
 
-        mI_pwm = max(0.12, min(0.95, potencia + correccion))
-        mD_pwm = max(0.12, min(0.95, potencia - correccion))
+        mI_pwm = max(0.02, min(0.50, potencia + correccion))
+        mD_pwm = max(0.02, min(0.50, potencia - correccion))
         sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
         sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
         sim.simxSynchronousTrigger(clientID)
@@ -209,8 +212,9 @@ def avanzar_corrigiendo(distancia_cm=56):
 
         if not moviendo_adelante: correccion_lateral = -correccion_lateral
 
-        mI_pwm = max(0.10, min(0.25, POTENCIA_FINA - correccion_lateral))
-        mD_pwm = max(0.10, min(0.25, POTENCIA_FINA + correccion_lateral))
+        # Límites inferiores bajados a 0.02 y máximos a 0.15 para un ajuste milimétrico
+        mI_pwm = max(0.02, min(0.15, POTENCIA_FINA - correccion_lateral))
+        mD_pwm = max(0.02, min(0.15, POTENCIA_FINA + correccion_lateral))
         sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
         sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
         sim.simxSynchronousTrigger(clientID)
@@ -268,8 +272,8 @@ def generate_mapping_sources(img):
     H = cv2.getPerspectiveTransform(pts_src, pts_dst)
     
     processed_orig = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
-    lower_brown = np.array([0, 0, 0])
-    upper_brown = np.array([102,255,255])
+    lower_brown = np.array([0, 0, 66])
+    upper_brown = np.array([25,255,255])
     mask_orig = cv2.inRange(processed_orig, lower_brown, upper_brown)
     
     mask_temp = cv2.warpPerspective(mask_orig, H, (WIDTH, HEIGHT), borderValue=0)
@@ -372,8 +376,8 @@ def generate_mapping_sources(img):
 
         interpretationSpots = np.array([
     #MIDDLE
+    [400, 2699],
     [400, 2660],
-    [400, 2640],
     [400, 2300],
     [400, 2100],
     [400, 1700],
@@ -465,7 +469,7 @@ def turnBack():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    girar_suave(direccion="izquierda", tiempo_estimado=3.5)
+    girar_suave(direccion="derecha", tiempo_estimado=2)
         
     lastTurn = 'r'
     esperarPasos(0.5)
@@ -663,11 +667,7 @@ def robot_loop():
 
 if __name__ == "__main__":
     try:
-        TIEMPO_AVANCE_CASILLA = 6.25 # Segundos que tarda en avanzar 1 casilla entera
-        TIEMPO_GIRO = 3.6324665057131984     # Segundos que tarda en rotar 90 grados
-        POTENCIA_MOTORES_AVANCE = 0.3
-        POTENCIA_MOTORES_GIRO = 0.3
-    
+
         print("[💻] INICIANDO EN MODO SIMULACIÓN (PC)...")
         # Conexión a CoppeliaSim
         sim.simxFinish(-1)
