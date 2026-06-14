@@ -1,0 +1,684 @@
+import requests
+import cv2
+import numpy as np
+import time
+import os
+import sim
+import math
+
+SERVER_URL = "http://34.0.201.131:8080/raspberry"
+WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
+
+distancesByNTiles = { 1 : 25, 2 : 50, 3 : 75, 4 : 100}
+
+imageForProcessingName = "proc"
+outputCameraRes = (820, 616)
+
+tempDir = 'r'
+tempPos = (0, 0)
+lastTurn = 'X'
+
+def esperarPasos(tiempo):
+    pasos = int(tiempo / 0.01)
+    for _ in range(pasos):
+        sim.simxSynchronousTrigger(clientID)
+
+VEL_MAX_RAD_S = 10.0
+
+def pwm_a_rads(pwm_value):
+    pwm_limpio = max(0.0, min(1.0, pwm_value))
+    return pwm_limpio * VEL_MAX_RAD_S
+
+currentDir = (0, 0)
+
+def configurar_direcciones(di, dd):
+    global currentDir
+    currentDir = (di, dd)
+
+def aplicarVelocidades(vel_izq, vel_der):
+    sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, vel_izq * currentDir[0], sim.simx_opmode_oneshot)
+    sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   vel_der * currentDir[1], sim.simx_opmode_oneshot)
+
+def obtener_distancia(nombre):
+    s = SENSORES_SIM["Derecha"] if nombre == "Izquierda" else (SENSORES_SIM["Izquierda"] if nombre == "Derecha" else SENSORES_SIM[nombre])
+    
+    returnCode, detectionState, detectedPoint, detectedObjectHandle, detectedSurfaceNormalVector = sim.simxReadProximitySensor(clientID, s, sim.simx_opmode_blocking)
+    
+    if returnCode == sim.simx_return_ok and detectionState:
+        distancia_metros = math.sqrt(detectedPoint[0]**2 + detectedPoint[1]**2 + detectedPoint[2]**2)
+        return distancia_metros * 100.0
+    
+    return 999.0
+
+def detener_motores():
+    aplicarVelocidades(0, 0)
+    configurar_direcciones(0, 0)
+    sim.simxSynchronousTrigger(clientID)
+
+def girar_suave(grados=90, direccion="derecha", tiempo_estimado=0.75):
+    print(f"[↺] Giro hacia la {direccion} de forma lenta y controlada...")
+    
+    VEL_BASE_FASE1 = 0.03
+    VEL_PICO_FASE1 = 0.11
+    VEL_BARRIDO_ATRAS = 0.08
+    VEL_ESCANEO = 0.03
+    VEL_CORRECCION = 0.11
+
+    dir_giro = (1, -1) if direccion == "derecha" else (-1, 1)
+    dir_atras = (-1, 1) if direccion == "derecha" else (1, -1)
+
+    configurar_direcciones(*dir_giro)
+    pasos_totales = int(tiempo_estimado / 0.01)
+
+    for paso in range(pasos_totales):
+        progreso = paso / pasos_totales
+        curva_velocidad = VEL_BASE_FASE1 + VEL_PICO_FASE1 * math.sin(progreso * math.pi)
+        pwm = pwm_a_rads(max(0.0, min(1.0, curva_velocidad)))
+        
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.1)
+
+    configurar_direcciones(*dir_atras) 
+    pwm_atras = pwm_a_rads(VEL_BARRIDO_ATRAS)
+    aplicarVelocidades(pwm_atras, pwm_atras)    
+    esperarPasos(0.4)                    
+    detener_motores()
+    esperarPasos(0.1)
+    
+    configurar_direcciones(*dir_giro) 
+    pwm_escaneo = pwm_a_rads(VEL_ESCANEO)
+    aplicarVelocidades(pwm_escaneo, pwm_escaneo)
+    
+    sensor_escaneo = "Inferior"
+    nombres_sensores = ["Delantero", "Inferior", "Izquierda", "Derecha"]
+    distancias = {sensor: obtener_distancia(sensor) for sensor in nombres_sensores}
+    distancias_validas = {s: d for s, d in distancias.items() if d != 999.0}
+    if distancias_validas:
+        sensor_escaneo = min(distancias_validas, key=distancias_validas.get)
+        dist_minima = distancias_validas[sensor_escaneo]
+    else:
+        sensor_escaneo = "Inferior"
+        dist_minima = 999.0
+            
+    print(f"[*] Sensor de escaneo elegido: {sensor_escaneo}")
+    
+    pasos_escaneo_max = int(2.5 / 0.01) 
+    for _ in range(pasos_escaneo_max):
+        dist_actual = obtener_distancia(sensor_escaneo)        
+        
+        if dist_actual != 999.0:
+            if dist_actual < dist_minima: 
+                dist_minima = dist_actual
+            if dist_minima != 999.0 and dist_actual > (dist_minima + 0.3): 
+                break
+        sim.simxSynchronousTrigger(clientID)
+
+    configurar_direcciones(*dir_atras) 
+    pwm_fin = pwm_a_rads(VEL_CORRECCION)
+    aplicarVelocidades(pwm_fin, pwm_fin)
+    esperarPasos(0.13)                    
+    detener_motores()
+
+def avanzar_corrigiendo(distancia_cm=25):
+    tiempo_estimado = (distancia_cm) / 80.0 
+    print(f"[~] Avanzando {distancia_cm}cm...")
+    Kp, Kd = 0.002, 0.002
+    
+    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.04 
+    dist_izq_ant = dist_der_ant = None
+
+    configurar_direcciones(1, 1)
+    pasos_totales = int(tiempo_estimado / 0.01)
+
+    for paso in range(pasos_totales):        
+        progreso = paso / pasos_totales
+        potencia = max(0.0, min(1.0, 0.05 + 0.15 * math.sin(progreso * math.pi)))
+        cambio_izq = cambio_der = correccion = 0.0
+        
+        dist_izq, dist_der = obtener_distancia("Izquierda"), obtener_distancia("Derecha")
+        if dist_izq < UMBRAL_PARED:
+            if dist_izq_ant is not None and dist_izq_ant < UMBRAL_PARED: cambio_izq = dist_izq - dist_izq_ant  
+            correccion += ((dist_izq - TARGET_CERCA) * Kp) + (cambio_izq * Kd)
+            dist_izq_ant = dist_izq
+        else: dist_izq_ant = None 
+
+        if dist_der < UMBRAL_PARED:
+            if dist_der_ant is not None and dist_der_ant < UMBRAL_PARED: cambio_der = dist_der - dist_der_ant  
+            correccion -= ((dist_der - TARGET_CERCA) * Kp) + (cambio_der * Kd)
+            dist_der_ant = dist_der
+        else: dist_der_ant = None
+
+        mI_pwm = max(0.02, min(0.50, potencia + correccion))
+        mD_pwm = max(0.02, min(0.50, potencia - correccion))
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.2)
+
+    dist_del, dist_tras = obtener_distancia("Delantero"), obtener_distancia("Inferior")
+    sensor_elegido = "Delantero" if dist_del < dist_tras else "Inferior"
+    dist_inicial = dist_del if dist_del < dist_tras else dist_tras
+
+    if dist_inicial > 45.0:
+        detener_motores()
+        return
+
+    target = 5.0 if dist_inicial < 17.5 else 30.0
+    dist_izq_ant = dist_der_ant = None
+    target_izq = obtener_distancia("Izquierda") if obtener_distancia("Izquierda") < UMBRAL_PARED else TARGET_CERCA
+    target_der = obtener_distancia("Derecha") if obtener_distancia("Derecha") < UMBRAL_PARED else TARGET_CERCA
+
+    while True:
+        dist_actual = obtener_distancia(sensor_elegido)
+        error = dist_actual - target
+        if abs(error) < 0.5: break
+
+        moviendo_adelante = True
+        if sensor_elegido == "Delantero":
+            if error > 0: configurar_direcciones(1, 1)
+            else: configurar_direcciones(-1, -1); moviendo_adelante = False
+        else: 
+            if error > 0: configurar_direcciones(-1, -1); moviendo_adelante = False
+            else: configurar_direcciones(1, 1)
+
+        dist_izq, dist_der = obtener_distancia("Izquierda"), obtener_distancia("Derecha")
+        correccion_lateral = 0.0
+
+        if dist_izq < UMBRAL_PARED:
+            cambio_izq = (dist_izq - dist_izq_ant) if dist_izq_ant is not None else 0.0
+            correccion_lateral += (dist_izq - target_izq) * Kp + (cambio_izq * Kd)
+            dist_izq_ant = dist_izq
+            
+        if dist_der < UMBRAL_PARED:
+            cambio_der = (dist_der - dist_der_ant) if dist_der_ant is not None else 0.0
+            correccion_lateral -= (dist_der - target_der) * Kp + (cambio_der * Kd)
+            dist_der_ant = dist_der
+
+        if not moviendo_adelante: correccion_lateral = -correccion_lateral
+
+        mI_pwm = max(0.02, min(0.15, POTENCIA_FINA - correccion_lateral))
+        mD_pwm = max(0.02, min(0.15, POTENCIA_FINA + correccion_lateral))
+        sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
+        sim.simxSetJointTargetVelocity(clientID, ruedaDerecha,   pwm_a_rads(mD_pwm) * currentDir[1], sim.simx_opmode_oneshot)
+        sim.simxSynchronousTrigger(clientID)
+
+    detener_motores()
+    esperarPasos(0.2)
+
+def obtener_imagen_simulador():
+    """Captura el frame actual del Vision_sensor de CoppeliaSim y lo adapta a OpenCV (BGR)."""
+    retCode, resolution, image = sim.simxGetVisionSensorImage(clientID, camara, 0, sim.simx_opmode_blocking)
+    print("A")
+    img = np.array(image, dtype=np.float32)
+    img = img.astype(np.uint8)  # Convierte a uint8
+    img.resize(resolution[1], resolution[0], 3)
+    img = cv2.flip(img, 0)
+    print("O")
+    img = cv2.cvtColor(img, cv2.COLOR_RGB2BGR)
+
+    return img
+
+def controlar_electroiman(estado):
+    sim.simxSetIntegerSignal(clientID, "estado_iman", estado, sim.simx_opmode_blocking)
+
+def pillarLlave():
+    controlar_electroiman(1)
+
+def abrirPuerta():
+    turnRight()
+    controlar_electroiman(0)
+    turnLeft()
+
+def generate_mapping_sources(img):
+    """Genera la homografía en blanco y negro para el análisis del mapa."""
+    outputXSize = 800
+    latRate = 1/4 
+    nTilesInVArea = 4.5
+    latMargin = outputXSize * latRate / 2
+    outputYSize = int((outputXSize - (2 * latMargin)) * nTilesInVArea)
+    WIDTH, HEIGHT = outputXSize, outputYSize
+    
+    if img is None:
+        print("Error: Imagen no recibida correctamente.")
+        return None, None
+
+    Base_W, Base_H = 3280, 2464
+    h, w = img.shape[:2]
+    scale_x, scale_y = w / Base_W, h / Base_H
+
+    pts_src = np.array([[600, 2460], [2792, 2460], [1920, 944], [1400, 944]], dtype=np.float32)
+
+    pts_src[:, 0] *= scale_x  
+    pts_src[:, 1] *= scale_y  
+
+    pts_dst = np.array([[latMargin, HEIGHT], [WIDTH - latMargin, HEIGHT], [WIDTH - latMargin, 0], [latMargin, 0]], dtype=np.float32)
+    H = cv2.getPerspectiveTransform(pts_src, pts_dst)
+    
+    processed_orig = cv2.cvtColor(img, cv2.COLOR_BGR2HSV)
+    lower_brown = np.array([0, 0, 66])
+    upper_brown = np.array([25,255,255])
+    mask_orig = cv2.inRange(processed_orig, lower_brown, upper_brown)
+    
+    mask_temp = cv2.warpPerspective(mask_orig, H, (WIDTH, HEIGHT), borderValue=0)
+    kernel = np.ones((9,9), np.uint8)
+    mask_temp = cv2.morphologyEx(mask_temp, cv2.MORPH_OPEN, kernel)
+    mask_temp = cv2.morphologyEx(mask_temp, cv2.MORPH_CLOSE, kernel)
+
+    bottom_30 = int(HEIGHT * 0.7)
+    edges = cv2.Canny(mask_temp[bottom_30:, :], 50, 150)
+    lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=40, minLineLength=40, maxLineGap=10)
+    
+    angles = []
+    if lines is not None:
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if y2 > y1: x1, y1, x2, y2 = x2, y2, x1, y1
+            dx, dy = x2 - x1, y1 - y2
+            if dx != 0 or dy != 0:
+                tilt = 90.0 - np.degrees(np.arctan2(dy, dx))
+                if -5 < tilt < 5: angles.append(tilt)
+
+    best_tilt = np.median(angles) if angles else 0
+        
+    bottom_15 = int(HEIGHT * 0.85)
+    col_sums = np.mean(mask_temp[bottom_15:, :], axis=0)
+    is_wall = col_sums > (255 * 0.3)
+    mid_x = WIDTH // 2
+    
+    left_wall_x, left_wall_found = 0, False
+    for x in range(mid_x, -1, -1):
+        if is_wall[x]: left_wall_x, left_wall_found = x, True; break
+            
+    right_wall_x, right_wall_found = WIDTH - 1, False
+    for x in range(mid_x, WIDTH):
+        if is_wall[x]: right_wall_x, right_wall_found = x, True; break
+
+    shift_x = 0
+    if left_wall_found and right_wall_found:
+        shift_x = mid_x - ((left_wall_x + right_wall_x) // 2)
+    elif left_wall_found:
+        shift_x = int(latMargin) - left_wall_x
+    elif right_wall_found:
+        shift_x = int(WIDTH - latMargin) - right_wall_x
+    
+    M_rot = cv2.getRotationMatrix2D((WIDTH // 2, HEIGHT), best_tilt, 1.0)
+    H_final = np.vstack([M_rot, [0, 0, 1]])
+    H_final = np.vstack([[[1, 0, shift_x], [0, 1, 0]], [0, 0, 1]]) @ H_final @ H
+    
+    mask_final = cv2.warpPerspective(mask_orig, H_final, (WIDTH, HEIGHT), borderValue=0)
+    mask_final = cv2.morphologyEx(mask_final, cv2.MORPH_CLOSE, kernel)
+    
+    print("INFO: Procesamiento morfológico terminado. Dibujando puntos...")
+
+    lado = 51
+    mitad = lado // 2
+    color_azul = (255, 0, 0)
+
+    try:
+        from pathlib import Path
+        directorio = Path(__file__).parent
+    except NameError:
+        import os
+        directorio = os.getcwd()
+    except Exception as e:
+        print(f"Error inesperado con la ruta: {e}")
+        directorio = ""
+
+    img_original_dibujada = img.copy()
+    
+    for (x, y) in pts_src:
+        x, y = int(x), int(y)
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        cv2.rectangle(img_original_dibujada, pt1, pt2, color_azul, thickness=-1)
+
+    # Usamos os.path.join o el operador / de Path de forma segura
+    ruta_salida = f"{directorio}/org_dotted.jpg"
+
+    # 3. Exportar y verificar éxito
+    exito = cv2.imwrite(ruta_salida, img_original_dibujada)
+    
+    if exito:
+        print(f"ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+    else:
+        print(f"ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
+
+    # 1. Convertir la máscara a 3 canales para poder dibujar en rojo
+    mask_color = cv2.cvtColor(mask_final, cv2.COLOR_GRAY2BGR)
+
+    pts_src_formateados = np.array([pts_src], dtype=np.float32)
+    esquinas_finales = cv2.perspectiveTransform(pts_src_formateados, H_final)[0]
+
+    for (x, y) in esquinas_finales:
+        x, y = int(x), int(y) # Tienen que ser enteros para poder dibujar
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        cv2.rectangle(mask_color, pt1, pt2, color_azul, thickness=-1)
+
+        interpretationSpots = np.array([
+    #MIDDLE
+    [400, 2699],
+    [400, 2660],
+    [400, 2300],
+    [400, 2100],
+    [400, 1700],
+    [400, 1500],
+    [400, 1100],
+    [400,  900],
+    [400,  500],
+    [400,  300],
+
+    #LEFT
+    [50, 2630],
+    [50, 2065],
+    [50, 1450],
+    [50,  815],
+    [50,  180],
+
+    #RIGHT
+    [760, 2630],
+    [760, 2065],
+    [760, 1450],
+    [760,  815],
+    [760,  180]], 
+    dtype=np.int32)
+
+    color_rojo = (0, 0, 255)
+    
+    for (x, y) in interpretationSpots:
+        pt1 = (x - mitad, y - mitad)
+        pt2 = (x + mitad, y + mitad)
+        cv2.rectangle(mask_color, pt1, pt2, color_rojo, thickness=-1)
+
+    print("INFO: Puntos dibujados. Preparando exportación...")
+
+    ruta_salida = f"{directorio}/img_dotted.jpg"
+    exito = cv2.imwrite(ruta_salida, mask_color)
+    
+    if exito:
+        print(f"ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+    else:
+        print(f"ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
+
+    return mask_final
+
+def moveForward(nTiles):
+    global tempPos, lastTurn
+    if nTiles == 0: return
+    
+    additions = {'u': (0, 1), 'r': (1, 0), 'd': (0, -1), 'l': (-1, 0)}
+    addition = additions.get(tempDir, (0, 0))
+
+    avanzar_corrigiendo(distancesByNTiles[nTiles])
+    for _ in range(nTiles):
+        tempPos = (tempPos[0] + addition[0], tempPos[1] + addition[1])
+        sync_position_with_server()
+        esperarPasos(0.2)
+    
+    lastTurn = 'X'
+    esperarPasos(0.5)
+
+def turnLeft():
+    global tempDir, lastTurn
+    trans = {'u': 'l', 'r': 'u', 'd': 'r', 'l': 'd'}
+    tempDir = trans.get(tempDir, tempDir)
+    sync_position_with_server()
+    
+    girar_suave(direccion="izquierda")
+        
+    lastTurn = 'l'
+    esperarPasos(0.5)
+
+def turnRight():
+    global tempDir, lastTurn
+    trans = {'u': 'r', 'r': 'd', 'd': 'l', 'l': 'u'}
+    tempDir = trans.get(tempDir, tempDir)
+    sync_position_with_server()
+    
+    girar_suave(direccion="derecha")
+
+    lastTurn = 'r'
+    esperarPasos(0.5)
+
+def turnBack():
+    global tempDir, lastTurn
+    trans = {'u': 'd', 'r': 'l', 'd': 'u', 'l': 'r'}
+    tempDir = trans.get(tempDir, tempDir)
+    sync_position_with_server()
+    
+    girar_suave(direccion="derecha", tiempo_estimado=1.5)
+        
+    lastTurn = 'r'
+    esperarPasos(0.5)
+
+def sync_position_with_server():
+    try:
+        requests.post(f"{SERVER_URL}/update_position", json={"pos": list(tempPos), "dir": tempDir}, timeout=2)
+    except requests.exceptions.RequestException: pass
+
+def check_robot_pause():
+    try:
+        res = requests.get(f"{SERVER_URL}/estado_pausa", timeout=2)
+        if res.status_code == 200:
+            return res.json().get('pausa', False)
+    except requests.exceptions.RequestException:
+        pass
+    return False
+
+def send_robot_step(homography, resized):
+    print("Enviando imágenes de análisis a la VM...")
+    try:
+        _, cenital_buf = cv2.imencode('.jpg', homography)
+        _, resized_buf = cv2.imencode('.jpg', resized)
+        
+        files = {
+            "cenital_img": (f"{imageForProcessingName}_cenitalBW.jpg", cenital_buf.tobytes(), "image/jpeg"),
+            "resized_img": (f"{imageForProcessingName}_resized.jpg", resized_buf.tobytes(), "image/jpeg")
+        }
+        res = requests.post(f"{SERVER_URL}/analyze", files=files, data={"img_name": imageForProcessingName})
+        if res.status_code == 200:
+            data = res.json()
+            return data.get('destination_type'), data.get('commands', [])
+    except requests.exceptions.RequestException as e:
+        print(f"Error de conexión analizando paso: {e}")
+    return None, None
+
+def skip_robot_step():
+    print("Saltando paso (Cálculo remoto de ruta)...")
+    try:
+        res = requests.post(f"{SERVER_URL}/next_route")
+        if res.status_code == 200:
+            data = res.json()
+            return data.get('destination_type'), data.get('commands', [])
+    except requests.exceptions.RequestException as e:
+        print(f"Error de conexión saltando paso: {e}")
+    return None, None
+
+def send_reset_command():
+    global tempPos, tempDir
+    tempDir, tempPos = 'r', (0, 0)
+    print("Enviando comando de reinicio a la VM...")
+    try:
+        res = requests.post(f"{SERVER_URL}/reset")
+        if res.status_code == 200:
+            print(f"Servidor reiniciado: {res.json().get('message')}")
+    except requests.exceptions.RequestException:
+        print("Imposible conectar con FastAPI para realizar Reset.")
+
+def executeCommands(commands):
+    if not commands: return
+    for cmd in commands:
+        action, steps = cmd[0], int(cmd[1])
+        if action == 'r': turnRight()
+        elif action == 'l': turnLeft()
+        elif action == 'b': turnBack()
+        moveForward(steps)
+
+# --- Bucle de ejecución principal ---
+def robot_loop():
+    estado_actual = "ESCANEO" 
+    siguiente_estado = None
+    dest_type, commands = None, []
+    image_idx = 0
+    qr_idx = 0
+    en_pausa_notificada = False
+    
+    while True:
+        if estado_actual == "PAUSA":
+            if check_robot_pause():
+                if not en_pausa_notificada:
+                    print("Robot en PAUSA por orden del servidor. Esperando luz verde...")
+                    en_pausa_notificada = True
+                time.sleep(1.5)
+                continue
+            else:
+                if en_pausa_notificada:
+                    print("Pausa terminada. Reanudando operaciones...")
+                    en_pausa_notificada = False
+                estado_actual = siguiente_estado
+                continue
+        if estado_actual == "ESCANEO":
+            if estado_actual == "ESCANEO":
+                print("Capturando frame en tiempo real desde CoppeliaSim...")
+                frame_bgr = obtener_imagen_simulador()
+                
+                homography = generate_mapping_sources(frame_bgr)
+                if homography is None:
+                    time.sleep(1); continue
+                    
+                dest_type, commands = send_robot_step(homography, frame_bgr)
+                if dest_type is None:
+                    time.sleep(2); continue
+                    
+                image_idx += 1
+                siguiente_estado = "MOVIMIENTO"
+                estado_actual = "PAUSA"
+
+        elif estado_actual == "SALTO_ESCANEO":
+            dest_type, commands = skip_robot_step()
+            if dest_type is None: time.sleep(2); continue
+            siguiente_estado = "MOVIMIENTO"
+            estado_actual = "PAUSA"
+
+        elif estado_actual == "MOVIMIENTO":
+            if commands:
+                print(f"Ejecutando ruta hacia '{dest_type}'. Comandos: {commands}")
+                executeCommands(commands)
+            siguiente_estado = "INTERACCION"
+            estado_actual = "PAUSA"
+
+        elif estado_actual == "INTERACCION":
+            if dest_type == 'X' and not commands:
+                print("Laberinto completado o sin salidas."); break
+                
+            elif dest_type == 'D':
+                print(f"Acción en casilla: Interactuando con la puerta...")
+
+                abrirPuerta()
+
+                try:
+                    requests.post(f"{SERVER_URL}/interactuar", json={"tipo": 'D'})
+                except requests.exceptions.RequestException: pass
+                time.sleep(2)
+                estado_actual = "ESCANEO"
+
+            elif dest_type == 'K':
+                print(f"Acción en casilla: Interactuando con la llave...")
+
+                pillarLlave()
+                    
+                try:
+                    requests.post(f"{SERVER_URL}/interactuar", json={"tipo": 'K'})
+                except requests.exceptions.RequestException: pass
+                time.sleep(2)
+                estado_actual = "SALTO_ESCANEO"
+
+
+            elif dest_type == '?':
+                print("Inspeccionando interrogante (QR) en el simulador...")
+
+                frame = obtener_imagen_simulador()
+
+                frame_pequeno = cv2.resize(frame, (820, 616))
+                success, buffer = cv2.imencode('.jpg', frame_pequeno, [int(cv2.IMWRITE_JPEG_QUALITY), 60])
+                
+                if success:
+                    files = {"file": ("qr.jpg", buffer.tobytes(), "image/jpeg")}
+                    try:
+                        # Mandamos la imagen a la API de control
+                        res = requests.post("http://34.0.201.131:8080/control/leer-qr", files=files)
+                        if res.status_code == 200:
+                            print("QR enviado. Esperando a que el usuario responda por voz...")
+                    except Exception as e:
+                        print("Error enviando QR:", e)
+                
+                # 2. BUCLE DE ESPERA (POLLING)
+                interaccion_terminada = False
+                while not interaccion_terminada:
+                    try:
+                        # Preguntamos al servidor si el pipeline ya terminó
+                        estado_res = requests.get("http://34.0.201.131:8080/control/estado-interaccion", timeout=2)
+                        if estado_res.status_code == 200:
+                            interaccion_terminada = estado_res.json().get("completada", False)
+                    except:
+                        pass
+                    
+                    if not interaccion_terminada:
+                        time.sleep(2) 
+                
+                print("Respuesta procesada por Gemini. ¡El robot continúa!")
+                
+                try:
+                    requests.post(f"{SERVER_URL}/interactuar", json={"tipo": "?"})
+                except requests.exceptions.RequestException: pass
+                
+                qr_idx += 1
+
+                estado_actual = "SALTO_ESCANEO"
+                
+            elif dest_type == 'X':
+                estado_actual = "ESCANEO"
+                
+        time.sleep(0.1)
+
+if __name__ == "__main__":
+    try:
+
+        print("INICIANDO SIMULACIÓN")
+        sim.simxFinish(-1)
+        clientID = sim.simxStart('127.0.0.1', 19999, True, True, 2000, 5)
+        if clientID == 0:
+            print("Conectado a CoppeliaSim en el puerto 19999")
+        else:
+            print("No se pudo conectar a CoppeliaSim")
+            os._exit(1)
+        
+        sim.simxSynchronous(clientID, True)
+        sim.simxStartSimulation(clientID, sim.simx_opmode_blocking)
+
+        _, camara = sim.simxGetObjectHandle(clientID, 'Vision_sensor', sim.simx_opmode_blocking)
+        _, ruedaDerecha = sim.simxGetObjectHandle(clientID, 'RuedaR', sim.simx_opmode_blocking)
+        _, ruedaIzquierda = sim.simxGetObjectHandle(clientID, 'RuedaL', sim.simx_opmode_blocking)
+        _, ultrasonidoDerecha = sim.simxGetObjectHandle(clientID, 'SensorR', sim.simx_opmode_blocking)
+        _, ultrasonidoIzquierda = sim.simxGetObjectHandle(clientID, 'SensorL', sim.simx_opmode_blocking)
+        _, ultrasonidoDelante = sim.simxGetObjectHandle(clientID, 'SensorD', sim.simx_opmode_blocking)
+        _, ultrasonidoAtras = sim.simxGetObjectHandle(clientID, 'SensorA', sim.simx_opmode_blocking)
+
+        SENSORES_SIM = {
+            "Delantero": ultrasonidoDelante,
+            "Izquierda": ultrasonidoIzquierda,
+            "Derecha": ultrasonidoDerecha,
+            "Inferior": ultrasonidoAtras
+        }
+        
+        send_reset_command()
+        robot_loop()
+
+    except KeyboardInterrupt:
+        print("\nSimulación detenida manualmente.")
