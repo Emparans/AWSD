@@ -22,6 +22,10 @@ Durante la exploración, AWSD encuentra distintos retos en forma de preguntas o 
 
 # Foto Robot
 
+<div align="center">
+  <img src="fotos_proyecto/FotoRobot.jpeg" alt="EsquemaElectrico" width="500"/>
+</div>
+
 ---
 
 # Hardware
@@ -107,9 +111,9 @@ Diagrama general de la arquitectura software del proyecto.
 
 Queremos agradecer a nuestros 3 profesores de la asignatura por ayudarnos en el proceso de creación de nuestro proyecto:
 
-Fernando Luis Vilariño Freire
-Carlos García Calvo
-Vernon Stanley Albayeros Duarte
+- Fernando Luis Vilariño Freire
+- Carlos García Calvo
+- Vernon Stanley Albayeros Duarte
 
 # URL acceso a la web
 
