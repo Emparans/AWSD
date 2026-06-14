@@ -103,7 +103,7 @@ Diagrama general de la arquitectura software del proyecto.
 | Joan Aguilar Vilalta | [@JoanAV-H](https://github.com/JoanAV-H) |
 | Gerard Benet Martinez | [@Gemarcx](https://github.com/Gemarcx) |
 | Martí Barrio Galobardes | [@MBGit05](https://github.com/MBGit05) |
-| Javier Emparan Lopez | [@Emparans](https://github.com/Emparans) |
+| Javier Emparan López | [@Emparans](https://github.com/Emparans) |
 
 ---
 
