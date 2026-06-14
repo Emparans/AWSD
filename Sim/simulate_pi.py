@@ -1,18 +1,11 @@
 import requests
-from pathlib import Path
 import cv2
 import numpy as np
 import time
-import json
-import threading
-import websocket
-import base64
 import os
-import random
 import sim
 import math
 
-# URL pública de tu FastAPI en la VM
 SERVER_URL = "http://34.0.201.131:8080/raspberry"
 WS_VIDEO_URL = "ws://34.0.201.131:8080/control/video_stream"
 
@@ -21,7 +14,6 @@ distancesByNTiles = { 1 : 25, 2 : 50, 3 : 75, 4 : 100}
 imageForProcessingName = "proc"
 outputCameraRes = (820, 616)
 
-# Estado de telemetría física del Robot
 tempDir = 'r'
 tempPos = (0, 0)
 lastTurn = 'X'
@@ -54,7 +46,7 @@ def obtener_distancia(nombre):
     
     if returnCode == sim.simx_return_ok and detectionState:
         distancia_metros = math.sqrt(detectedPoint[0]**2 + detectedPoint[1]**2 + detectedPoint[2]**2)
-        return distancia_metros * 100.0 # Convertir a cm
+        return distancia_metros * 100.0
     
     return 999.0
 
@@ -63,7 +55,7 @@ def detener_motores():
     configurar_direcciones(0, 0)
     sim.simxSynchronousTrigger(clientID)
 
-def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1):
+def girar_suave(grados=90, direccion="derecha", tiempo_estimado=0.75):
     print(f"[↺] Giro hacia la {direccion} de forma lenta y controlada...")
     
     VEL_BASE_FASE1 = 0.03
@@ -109,7 +101,7 @@ def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1):
         sensor_escaneo = min(distancias_validas, key=distancias_validas.get)
         dist_minima = distancias_validas[sensor_escaneo]
     else:
-        sensor_escaneo = "Inferior" # Fallback por defecto si estamos en espacio abierto
+        sensor_escaneo = "Inferior"
         dist_minima = 999.0
             
     print(f"[*] Sensor de escaneo elegido: {sensor_escaneo}")
@@ -128,18 +120,17 @@ def girar_suave(grados=90, direccion="derecha", tiempo_estimado=1):
     configurar_direcciones(*dir_atras) 
     pwm_fin = pwm_a_rads(VEL_CORRECCION)
     aplicarVelocidades(pwm_fin, pwm_fin)
-    esperarPasos(0.16)                    
+    esperarPasos(0.13)                    
     detener_motores()
 
 def avanzar_corrigiendo(distancia_cm=25):
-    tiempo_estimado = (distancia_cm) / 70.0 
+    tiempo_estimado = (distancia_cm) / 80.0 
     print(f"[~] Avanzando {distancia_cm}cm...")
     Kp, Kd = 0.002, 0.002
     
-    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.06 
+    UMBRAL_PARED, TARGET_CERCA, POTENCIA_FINA = 15.0, 5.0, 0.04 
     dist_izq_ant = dist_der_ant = None
 
-    # Fase 1: Avance grueso
     configurar_direcciones(1, 1)
     pasos_totales = int(tiempo_estimado / 0.01)
 
@@ -170,7 +161,6 @@ def avanzar_corrigiendo(distancia_cm=25):
     detener_motores()
     esperarPasos(0.2)
 
-    # Fase 2: Ajuste longitudinal fino
     dist_del, dist_tras = obtener_distancia("Delantero"), obtener_distancia("Inferior")
     sensor_elegido = "Delantero" if dist_del < dist_tras else "Inferior"
     dist_inicial = dist_del if dist_del < dist_tras else dist_tras
@@ -212,7 +202,6 @@ def avanzar_corrigiendo(distancia_cm=25):
 
         if not moviendo_adelante: correccion_lateral = -correccion_lateral
 
-        # Límites inferiores bajados a 0.02 y máximos a 0.15 para un ajuste milimétrico
         mI_pwm = max(0.02, min(0.15, POTENCIA_FINA - correccion_lateral))
         mD_pwm = max(0.02, min(0.15, POTENCIA_FINA + correccion_lateral))
         sim.simxSetJointTargetVelocity(clientID, ruedaIzquierda, pwm_a_rads(mI_pwm) * currentDir[0], sim.simx_opmode_oneshot)
@@ -243,7 +232,7 @@ def pillarLlave():
 
 def abrirPuerta():
     turnRight()
-    controlar_electroiman(1)
+    controlar_electroiman(0)
     turnLeft()
 
 def generate_mapping_sources(img):
@@ -329,13 +318,12 @@ def generate_mapping_sources(img):
 
     lado = 51
     mitad = lado // 2
-    color_azul = (255, 0, 0) # Azul puro en BGR
+    color_azul = (255, 0, 0)
 
     try:
         from pathlib import Path
         directorio = Path(__file__).parent
     except NameError:
-        # Si __file__ falla (ej. estás en Jupyter/Colab), usamos la carpeta actual
         import os
         directorio = os.getcwd()
     except Exception as e:
@@ -344,7 +332,6 @@ def generate_mapping_sources(img):
 
     img_original_dibujada = img.copy()
     
-    # pts_src ya tiene las coordenadas ajustadas a la escala de la imagen original
     for (x, y) in pts_src:
         x, y = int(x), int(y)
         pt1 = (x - mitad, y - mitad)
@@ -358,9 +345,9 @@ def generate_mapping_sources(img):
     exito = cv2.imwrite(ruta_salida, img_original_dibujada)
     
     if exito:
-        print(f"✅ ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+        print(f"ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
     else:
-        print(f"❌ ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
+        print(f"ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
 
     # 1. Convertir la máscara a 3 canales para poder dibujar en rojo
     mask_color = cv2.cvtColor(mask_final, cv2.COLOR_GRAY2BGR)
@@ -402,26 +389,22 @@ def generate_mapping_sources(img):
     [760,  180]], 
     dtype=np.int32)
 
-    color_rojo = (0, 0, 255) # Ahora sí será rojo puro
+    color_rojo = (0, 0, 255)
     
     for (x, y) in interpretationSpots:
         pt1 = (x - mitad, y - mitad)
         pt2 = (x + mitad, y + mitad)
-        # OJO: Dibujamos sobre mask_color, no sobre mask_final
         cv2.rectangle(mask_color, pt1, pt2, color_rojo, thickness=-1)
 
     print("INFO: Puntos dibujados. Preparando exportación...")
 
-    # Usamos os.path.join o el operador / de Path de forma segura
     ruta_salida = f"{directorio}/img_dotted.jpg"
-
-    # 3. Exportar y verificar éxito
     exito = cv2.imwrite(ruta_salida, mask_color)
     
     if exito:
-        print(f"✅ ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
+        print(f"ÉXITO TOTAL: Imagen guardada en:\n -> {ruta_salida}")
     else:
-        print(f"❌ ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
+        print(f"ERROR CRÍTICO: cv2.imwrite falló. Comprueba que tienes permisos de escritura en:\n -> {ruta_salida}")
 
     return mask_final
 
@@ -469,12 +452,11 @@ def turnBack():
     tempDir = trans.get(tempDir, tempDir)
     sync_position_with_server()
     
-    girar_suave(direccion="derecha", tiempo_estimado=2)
+    girar_suave(direccion="derecha", tiempo_estimado=1.5)
         
     lastTurn = 'r'
     esperarPasos(0.5)
 
-# --- Peticiones de Análisis a la VM ---
 def sync_position_with_server():
     try:
         requests.post(f"{SERVER_URL}/update_position", json={"pos": list(tempPos), "dir": tempDir}, timeout=2)
@@ -504,7 +486,7 @@ def send_robot_step(homography, resized):
             data = res.json()
             return data.get('destination_type'), data.get('commands', [])
     except requests.exceptions.RequestException as e:
-        print(f"❌ Error de conexión analizando paso: {e}")
+        print(f"Error de conexión analizando paso: {e}")
     return None, None
 
 def skip_robot_step():
@@ -515,7 +497,7 @@ def skip_robot_step():
             data = res.json()
             return data.get('destination_type'), data.get('commands', [])
     except requests.exceptions.RequestException as e:
-        print(f"❌ Error de conexión saltando paso: {e}")
+        print(f"Error de conexión saltando paso: {e}")
     return None, None
 
 def send_reset_command():
@@ -525,9 +507,9 @@ def send_reset_command():
     try:
         res = requests.post(f"{SERVER_URL}/reset")
         if res.status_code == 200:
-            print(f"➡ Servidor reiniciado: {res.json().get('message')}")
+            print(f"Servidor reiniciado: {res.json().get('message')}")
     except requests.exceptions.RequestException:
-        print("❌ Imposible conectar con FastAPI para realizar Reset.")
+        print("Imposible conectar con FastAPI para realizar Reset.")
 
 def executeCommands(commands):
     if not commands: return
@@ -551,19 +533,19 @@ def robot_loop():
         if estado_actual == "PAUSA":
             if check_robot_pause():
                 if not en_pausa_notificada:
-                    print("⏸️ Robot en PAUSA por orden del servidor. Esperando luz verde...")
+                    print("Robot en PAUSA por orden del servidor. Esperando luz verde...")
                     en_pausa_notificada = True
                 time.sleep(1.5)
                 continue
             else:
                 if en_pausa_notificada:
-                    print("▶️ Pausa terminada. Reanudando operaciones...")
+                    print("Pausa terminada. Reanudando operaciones...")
                     en_pausa_notificada = False
                 estado_actual = siguiente_estado
                 continue
         if estado_actual == "ESCANEO":
             if estado_actual == "ESCANEO":
-                print("📸 Capturando frame en tiempo real desde CoppeliaSim...")
+                print("Capturando frame en tiempo real desde CoppeliaSim...")
                 frame_bgr = obtener_imagen_simulador()
                 
                 homography = generate_mapping_sources(frame_bgr)
@@ -593,7 +575,7 @@ def robot_loop():
 
         elif estado_actual == "INTERACCION":
             if dest_type == 'X' and not commands:
-                print("🏁 Laberinto completado o sin salidas."); break
+                print("Laberinto completado o sin salidas."); break
                 
             elif dest_type == 'D':
                 print(f"Acción en casilla: Interactuando con la puerta...")
@@ -619,7 +601,7 @@ def robot_loop():
 
 
             elif dest_type == '?':
-                print("❓ Inspeccionando interrogante (QR) en el simulador...")
+                print("Inspeccionando interrogante (QR) en el simulador...")
 
                 frame = obtener_imagen_simulador()
 
@@ -632,9 +614,9 @@ def robot_loop():
                         # Mandamos la imagen a la API de control
                         res = requests.post("http://34.0.201.131:8080/control/leer-qr", files=files)
                         if res.status_code == 200:
-                            print("✅ QR enviado. Esperando a que el usuario responda por voz...")
+                            print("QR enviado. Esperando a que el usuario responda por voz...")
                     except Exception as e:
-                        print("❌ Error enviando QR:", e)
+                        print("Error enviando QR:", e)
                 
                 # 2. BUCLE DE ESPERA (POLLING)
                 interaccion_terminada = False
@@ -650,7 +632,7 @@ def robot_loop():
                     if not interaccion_terminada:
                         time.sleep(2) 
                 
-                print("🎙️ Respuesta procesada por Gemini. ¡El robot continúa!")
+                print("Respuesta procesada por Gemini. ¡El robot continúa!")
                 
                 try:
                     requests.post(f"{SERVER_URL}/interactuar", json={"tipo": "?"})
@@ -668,21 +650,18 @@ def robot_loop():
 if __name__ == "__main__":
     try:
 
-        print("[💻] INICIANDO EN MODO SIMULACIÓN (PC)...")
-        # Conexión a CoppeliaSim
+        print("INICIANDO SIMULACIÓN")
         sim.simxFinish(-1)
         clientID = sim.simxStart('127.0.0.1', 19999, True, True, 2000, 5)
         if clientID == 0:
-            print("✅ Conectado a CoppeliaSim en el puerto 19999")
+            print("Conectado a CoppeliaSim en el puerto 19999")
         else:
-            print("❌ No se pudo conectar a CoppeliaSim")
+            print("No se pudo conectar a CoppeliaSim")
             os._exit(1)
         
-        # Modo síncrono
         sim.simxSynchronous(clientID, True)
         sim.simxStartSimulation(clientID, sim.simx_opmode_blocking)
 
-        # Obtener handles
         _, camara = sim.simxGetObjectHandle(clientID, 'Vision_sensor', sim.simx_opmode_blocking)
         _, ruedaDerecha = sim.simxGetObjectHandle(clientID, 'RuedaR', sim.simx_opmode_blocking)
         _, ruedaIzquierda = sim.simxGetObjectHandle(clientID, 'RuedaL', sim.simx_opmode_blocking)
@@ -691,7 +670,6 @@ if __name__ == "__main__":
         _, ultrasonidoDelante = sim.simxGetObjectHandle(clientID, 'SensorD', sim.simx_opmode_blocking)
         _, ultrasonidoAtras = sim.simxGetObjectHandle(clientID, 'SensorA', sim.simx_opmode_blocking)
 
-        # Mapeo de sensores para la lógica de paredes
         SENSORES_SIM = {
             "Delantero": ultrasonidoDelante,
             "Izquierda": ultrasonidoIzquierda,
@@ -703,4 +681,4 @@ if __name__ == "__main__":
         robot_loop()
 
     except KeyboardInterrupt:
-        print("\n[!] Simulación detenida manualmente.")
+        print("\nSimulación detenida manualmente.")
